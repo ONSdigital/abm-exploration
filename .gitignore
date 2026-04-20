@@ -1,0 +1,8 @@
+# Any sort of draw.io process map
+*.drawio
+# Ignore all .DS_Store files (created by macOS)
+.DS_Store
+# Ignore all .log files (commonly used for logging)
+*.log
+# Ignore all .tmp files (commonly used for temporary files)
+*.tmp
