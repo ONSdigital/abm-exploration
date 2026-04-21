@@ -69,18 +69,17 @@ class MoneyModel(mesa.Model):
         #self.agents.do("say_wealth") # Can also just made them do something 
                                       # without shuffling. 
 
-
-model = MoneyModel(n=12)
-
-for _ in range(30):         # Sim will run for 30 steps. Underscore is 
-    model.step()            # convention for a variable that is not used.
-
-
 # Creating a histogram to see the wealth distribution after 30 steps.
-agent_wealth = [agent.wealth for agent in model.agents]
+all_wealth = []
 
-graph = sns.histplot(agent_wealth, discrete=True)
-graph.set(
-        title="Wealth Distribution", xlabel="Wealth", ylabel="Number of Agents"
-)
+for _ in range(100): # Runs model 100 times, each with 30 steps
+    model = MoneyModel(n=10)
+    model.run_for(30)
+
+    for agent in model.agents: # Storing the results
+        all_wealth.append(agent.wealth)
+
+graph = sns.histplot(all_wealth, discrete=True) # Sets bins to be integers
+graph.set(title="Wealth Distribution", xlabel="Wealth", 
+          ylabel="Number of Agents")
 plt.show()
