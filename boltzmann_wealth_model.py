@@ -8,33 +8,25 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import mesa
 
-# Creating the agent. Mesa automatically assigns agents an integer to act as a
-# unique_id.
-
 class MoneyAgent(mesa.Agent):
     """
     An agent with fixed initial wealth.
     """
 
-    def __init__(self, model):
+    def __init__(self, model, ethnicity):
         # Passing parameters to the parent class - ensures base agent set-up 
         # happens before we set any agent behaviour.
         super().__init__(model)
 
-        # Creating an agent's variable and setting its initial value
         self.wealth = 1
+        self.ethnicity = ethnicity
 
-    def say_wealth(self):
-        """
-        Agent does something. In this case, it's saying hello.
-        """
-        print(f"Hi, I'm an agent, ID {self.unique_id}. My wealth is "
-              f"{self.wealth}.")
         
     def exchange_money(self):
         """
+        Agents exchange money between each other. In this function, one agent 
+        gives 1 'wealth' token to another.
         """
-        # First, verifying that the agent has any wealth to exchange.
         if self.wealth > 0: 
             other_agent = self.random.choice(self.model.agents)
             if other_agent is not None:
@@ -51,35 +43,35 @@ class MoneyModel(mesa.Model):
     def __init__(self, n, seed=None):
         
         super().__init__(seed=seed)
-        # Setting a seed means the model will do the same thing every time 
-        # you run it.
+        ethnicities = ["Green", "Blue", "Mixed"]
         self.num_agents = n
 
-        #Creating agents
-        MoneyAgent.create_agents(model=self, n=n)
+        MoneyAgent.create_agents(model=self, n=n,
+                                 ethnicity = self.random.choices(ethnicities, 
+                                                                 k=n))
 
     def step(self):
         """
         Advances the model by one step (a step is the smallest time period
         in the model, also called a tick)
         """
-        # Randomly shuffles the list of agents, then iterates through, calling
-        # the function passed as the parameter.
         self.agents.shuffle_do("exchange_money")
-        #self.agents.do("say_wealth") # Can also just made them do something 
-                                      # without shuffling. 
 
-# Creating a histogram to see the wealth distribution after 30 steps.
-all_wealth = []
+model = MoneyModel(n=100)
+model.run_for(30)
 
-for _ in range(100): # Runs model 100 times, each with 30 steps
-    model = MoneyModel(n=10)
-    model.run_for(30)
+# Obtaining qualities of first five agents.
+for agent in model.agents.select(at_most=5):
+    print(f"  Agent {agent.unique_id}: wealth={agent.wealth}, "
+          f"ethnicity={agent.ethnicity}")
 
-    for agent in model.agents: # Storing the results
-        all_wealth.append(agent.wealth)
 
-graph = sns.histplot(all_wealth, discrete=True) # Sets bins to be integers
-graph.set(title="Wealth Distribution", xlabel="Wealth", 
-          ylabel="Number of Agents")
-plt.show()
+# Getting all wealth values
+all_wealth = model.agents.get('wealth')
+print(f"First five wealth values: {all_wealth[:5]}")
+print(f"Total wealth in economy: {sum(all_wealth)}")
+
+wealth_and_ethnicity = model.agents.get(["wealth", "ethnicity"])
+print("First five agents (wealth, ethnicity):")
+for values in wealth_and_ethnicity [:5]:
+    print(f"  {values}")
