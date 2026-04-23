@@ -13,13 +13,12 @@ class MoneyAgent(mesa.Agent):
     An agent with fixed initial wealth.
     """
 
-    def __init__(self, model, ethnicity):
+    def __init__(self, model):
         # Passing parameters to the parent class - ensures base agent set-up 
         # happens before we set any agent behaviour.
         super().__init__(model)
 
         self.wealth = 1
-        self.ethnicity = ethnicity
 
         
     def exchange_money(self):
@@ -33,45 +32,47 @@ class MoneyAgent(mesa.Agent):
                 other_agent.wealth += 1
                 self.wealth -= 1
 
+    def donate_money(self, recipients):
+        """
+        Gives one wealth unit to a random recipient.
+        """
+        if self.wealth > 0 and len(recipients) > 0:
+            recipient = self.random.choice(recipients)
+            recipient.wealth += 1
+            self.wealth -= 1
 
-class MoneyModel(mesa.Model):
+
+
+class PolicyModel(mesa.Model):
     """
-    A model with some number of agents. Creates a subclass of the model class
-    from mesa. 
+    A model where rich agents donate to poorer agents, after an intial money
+    has occured.
     """
 
-    def __init__(self, n, seed=None):
+    def __init__(self, n):
         
-        super().__init__(seed=seed)
-        ethnicities = ["Green", "Blue", "Mixed"]
-        self.num_agents = n
+        super().__init__()
 
-        MoneyAgent.create_agents(model=self, n=n,
-                                 ethnicity = self.random.choices(ethnicities, 
-                                                                 k=n))
+        MoneyAgent.create_agents(model=self, n=n)
 
     def step(self):
         """
         Advances the model by one step (a step is the smallest time period
-        in the model, also called a tick)
+        in the model, also called a tick).
         """
         self.agents.shuffle_do("exchange_money")
 
-model = MoneyModel(n=100)
-model.run_for(30)
+        rich_agents = self.agents.select(lambda x: x.wealth >= 5)
+        poor_agents = self.agents.select(lambda x: x.wealth == 0)
 
-# Obtaining qualities of first five agents.
-for agent in model.agents.select(at_most=5):
-    print(f"  Agent {agent.unique_id}: wealth={agent.wealth}, "
-          f"ethnicity={agent.ethnicity}")
+        if len(rich_agents) > 0 and len(poor_agents) > 0:
+            rich_agents.shuffle_do("donate_money", recipients=poor_agents)
 
+model = PolicyModel(n=100)
+model.run_for(100)
 
-# Getting all wealth values
-all_wealth = model.agents.get('wealth')
-print(f"First five wealth values: {all_wealth[:5]}")
-print(f"Total wealth in economy: {sum(all_wealth)}")
+broke_agents = len(model.agents.select(lambda x: x.wealth == 0))
+rich_agents = len(model.agents.select(lambda x: x.wealth >= 5))
 
-wealth_and_ethnicity = model.agents.get(["wealth", "ethnicity"])
-print("First five agents (wealth, ethnicity):")
-for values in wealth_and_ethnicity [:5]:
-    print(f"  {values}")
+print(f"After redistribution policy, there are {broke_agents} broke agents and "
+      f"{rich_agents} rich agents.")
