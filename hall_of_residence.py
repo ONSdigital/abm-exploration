@@ -26,11 +26,11 @@ class Student(mesa.Agent):
         becomes the average sentiment of the two students. If the other student 
         is an ambassador, the sentiment is increased by a fixed amount.
         """
-        other_student = self.random.choice(self.model.students)
-        if isinstance(other_student, Ambassador):
-            self.sentiment += 0.1
+        other_person = self.random.choice(self.model.agents)
+        if isinstance(other_person, Ambassador):
+            self.sentiment += 0.25
         else:
-            self.sentiment = (self.sentiment + other_student.sentiment) / 2
+            self.sentiment = (self.sentiment + other_person.sentiment) / 2
 
 
 
@@ -60,12 +60,36 @@ class HallOfResidence(mesa.Model):
 
     def step(self):
         for student in self.students:
-            self.students.shuffle_do("interaction")
+            student.interaction()
 
 
-model = HallOfResidence(n_students=100, n_ambassadors=1)
-model.run_until(100)
 
-print('Model has finished running.')
-print(f'Average sentiment amongst students: {np.mean([student.sentiment for 
-                                                student in model.students])}')
+for _ in range(2):
+
+    model1 = HallOfResidence(n_students=200, n_ambassadors=1)
+    model1.run_until(100)
+    model2 = HallOfResidence(n_students=200, n_ambassadors=2)
+    model2.run_until(100)
+    model3 = HallOfResidence(n_students=200, n_ambassadors=3)
+    model3.run_until(100)
+
+
+print('Model variants have finished running.')
+
+print(f'Model 1 average sentiment amongst students: {
+    model1.students.agg("sentiment", np.mean)}')
+print(f'Model 1 percentage of students with good sentiment (above 0.9) = {
+    len(model1.students.select(lambda x: x.sentiment >= 0.9)) / 
+    len(model1.students) * 100}%')
+
+print(f'Model 2 average sentiment amongst students: {np.mean([
+    student.sentiment for student in model2.students])}')
+print(f'Model 2 percentage of students with good sentiment (above 0.9) = {
+    len(model2.students.select(lambda x: x.sentiment >= 0.9)) / 
+    len(model2.students) * 100}%')
+
+print(f'Model 3 average sentiment amongst students: {np.mean([
+    student.sentiment for student in model3.students])}')
+print(f'Model 3 percentage of students with good sentiment (above 0.9) = {
+    len(model3.students.select(lambda x: x.sentiment >= 0.9)) / 
+    len(model3.students) * 100}%')
