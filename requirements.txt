@@ -66,10 +66,11 @@ rich==15.0.0
 rich-click==1.9.7
 rpds-py==0.30.0
 scipy==1.17.1
+seaborn==0.13.2
 six==1.17.0
-solara==1.41.0
-solara-server==1.41.0
-solara-ui==1.41.0
+solara==1.57.4
+solara-server==1.57.4
+solara-ui==1.57.4
 stack-data==0.6.3
 starlette==0.52.1
 tornado==6.5.5
