@@ -52,10 +52,17 @@ class Student(CellAgent):
             else:
                 self.sentiment = (self.sentiment + person.sentiment) / 2
 
-    
     def step(self):
         self.move()
         self.interaction()
+
+    def student_portrayal(self):
+        portrayal = AgentPortrayalStyle(color='blue')
+        if self.sentiment < 0.25:
+            portrayal.update(('color', 'black'))
+        if self.sentiment > 0.75:
+            portrayal.update(('color', 'green'))
+        return portrayal
 
 
 class Ambassador(CellAgent):
@@ -79,6 +86,9 @@ class Ambassador(CellAgent):
     def step(self):
         self.move()
 
+    def ambassador_portrayal(self):
+        portrayal = AgentPortrayalStyle(color='red')
+        return portrayal
 
 
 class HallOfResidence(mesa.Model):
@@ -121,30 +131,60 @@ class HallOfResidence(mesa.Model):
         self.ambassadors.shuffle_do('step')
 
 
-for _ in range(2):
 
-    model1 = HallOfResidence(n_stu=200, n_amb=1, width=10, height=10, seed=None)
-    model1.run_until(60)
-    model2 = HallOfResidence(n_stu=200, n_amb=2, width=10, height=10, seed=None)
-    model2.run_until(60)
-    model3 = HallOfResidence(n_stu=200, n_amb=3, width=10, height=10, seed=None)
-    model3.run_until(60)
+model = HallOfResidence(n_stu=200, n_amb=1, width=10, height=10, seed=None)
+model.run_until(10)
 
-data1 = model1.data_collector.get_agent_vars_dataframe()
-data2 = model2.data_collector.get_agent_vars_dataframe()
-data3 = model3.data_collector.get_agent_vars_dataframe()
+data = model.data_collector.get_agent_vars_dataframe()
 
-g1 = sns.histplot(data1['sentiment'], binwidth=0.1, binrange=(0, 1))
-g1.set(title='Sentiment distribution', xlabel='Sentiment', 
+plot = sns.histplot(data['sentiment'], binwidth=0.1, binrange=(0, 1))
+plot.set(title='Sentiment distribution', xlabel='Sentiment', 
        ylabel='No. of students')
 plt.show()
-g2 = sns.histplot(data2['sentiment'], binwidth=0.1, binrange=(0, 1))
-g2.set(title='Sentiment distribution', xlabel='Sentiment',  
-       ylabel='No. of students')
-plt.show()
-g3 = sns.histplot(data3['sentiment'], binwidth=0.1, binrange=(0, 1))
-g3.set(title='Sentiment distribution', xlabel='Sentiment',
-         ylabel='No. of students')
-plt.show()
 
-print('Model variants have finished running.')
+print('Model has finished running.')
+
+viz_model = HallOfResidence(n_stu=50, n_amb=1, width=10, height=10)
+
+def agent_portrayal(agent):
+    if isinstance(agent, Ambassador):
+        return AgentPortrayalStyle(color='red')
+    portrayal = AgentPortrayalStyle(color='blue')
+    if agent.sentiment < 0.25:
+        portrayal = AgentPortrayalStyle(color='black')
+    elif agent.sentiment > 0.75:
+        portrayal = AgentPortrayalStyle(color='green')
+    return portrayal
+
+renderer = SpaceRenderer(model=viz_model, backend='matplotlib')
+renderer.setup_structure(lw=2, ls='solid', color='black', alpha=0.1)
+renderer.setup_agents(agent_portrayal)
+renderer.draw_structure()
+renderer.draw_agents()
+
+model_params = {
+    'n_stu': {
+        'type': 'SliderInt',
+        'value': 50,
+        'label': 'Number of students',
+        'min': 10,
+        'max': 500,
+        'step': 1,
+    },
+    'n_amb': {
+        'type': 'SliderInt',
+        'value': 1,
+        'label': 'Number of ambassadors',
+        'min': 0,
+        'max': 10,
+        'step': 1,
+    },
+    'width': 10,
+    'height': 10,
+}
+
+page = SolaraViz(model=viz_model, 
+                 renderer=renderer,
+                 model_params=model_params,
+                 name='Hall of Residence ABM',
+                 )
