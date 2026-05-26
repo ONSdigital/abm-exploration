@@ -7,31 +7,59 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
+import geopandas as gpd
+import networkx as nx
+import solara
 
-import mesa 
-from mesa.discrete_space import CellAgent, OrthogonalMooreGrid
-from mesa.visualization import SolaraViz, SpaceRenderer, make_plot_component
-from mesa.visualization.components import AgentPortrayalStyle
+import mesa
+from mesa.space import NetworkGrid
+from mesa.visualization import SolaraViz, make_plot_component
+
+gdf = gpd.read_file("C:\\Users\\stacea\\abm-exploration\\UoM_road_shapefiles\\OpenRoads_UniOfManchester.shp")
+gdf = gdf.explode(index_parts=False).reset_index(drop=True) # Explode MultiLineStrings into LineStrings
+print(gdf.geom_type.value_counts()) # Should be 'LineString'
+print(gdf.crs) # Checks coordinate system
+
+# Building a graph, where LineStrings are edges and endpoints are nodes
+def build_graph_from_shapefile(gdf):
+    G = nx.Graph()
+    for _, row in gdf.iterrows():
+        coords = list(row.geometry.coords)
+        for start, end in zip(coords[:-1], coords[1:]):
+            G.add_node(start, pos=start)
+            G.add_node(end, pos=end)
+            G.add_edge(start, end, length=row.geometry.length)
+
+    G = G.subgraph(max(nx.connected_components(G), key=len))
+
+    print(f"Nodes: {G.number_of_nodes()}, Edges: {G.number_of_edges()}")
+    print(f"Connected components: {nx.number_connected_components(G)}")
+
+    return G
 
 
-
-class Student(CellAgent):
+class Student(mesa.Agent):
     """
     A student, living in a university hall of residence, with an initial 
     sentiment towards the census between 0 and 1. The student can be influenced 
     by other students, and by student ambassadors, to change their sentiment.
     """
-    def __init__(self, model, cell):
+    def __init__(self, model, node):
         super().__init__(model)
 
-        self.cell = cell
+        self.node = node
         self.sentiment = self.random.uniform(0, 1)
+        model.grid.place_agent(self, node)
 
     def move(self):
         """
-        Student moves to a random neighbouring cell.
+        Student moves to a random neighbouring node.
         """
-        self.cell = self.cell.neighborhood.select_random_cell()
+        neighbors = list(self.model.graph.neighbors(self.node))
+        if neighbors:
+            new_node = self.random.choice(neighbors)
+            self.model.grid.move_agent(self, new_node)
+            self.node = new_node
 
 
     def interaction(self):
@@ -41,9 +69,10 @@ class Student(CellAgent):
         is an ambassador, the sentiment is increased by a fixed amount.
 
         Sentiment only transferred to another student/ambassador in the same
-        cell.
+        node.
         """
-        other_person = [a for a in self.cell.agents if a is not self]
+        other_person = [a for a in self.model.grid.get_cell_list_contents([
+            self.node]) if a is not self]
 
         if other_person:
             person = self.random.choice(other_person)
@@ -58,27 +87,19 @@ class Student(CellAgent):
         self.interaction()
 
 
-class Ambassador(CellAgent):
+class Ambassador(mesa.Agent):
     """
-    A student ambassador in a university hall of residence, with a 
-    positive sentiment towards the census. The ambassador can influence other 
-    students to increase their sentiment.
+    A student ambassador on the UoM campus, with a positive sentiment towards 
+    the census. The ambassador can influence other students to increase their 
+    sentiment.
     """
-    def __init__(self, model, cell):
+    def __init__(self, model, node):
         super().__init__(model)
 
-        self.cell = cell
+        self.node = node
         self.sentiment = 0.9
 
-    def move(self):
-        """
-        Ambassador moves to a random neighbouring cell.
-        """
-        self.cell = self.cell.neighborhood.select_random_cell()
-
-    def step(self):
-        self.move()
-
+        model.grid.place_agent(self, node)
 
 
 class HallOfResidence(mesa.Model):
@@ -86,65 +107,97 @@ class HallOfResidence(mesa.Model):
     A university hall of residence, with a certain number of students and 
     ambassadors.
     """
-    def __init__(self, n_stu, n_amb, width, height, seed=None):
+    def __init__(self, n_stu, n_amb, seed=None):
         """
         Initialises the spatial hall of residence model.
 
         Args:
             n_stu: Number of students in the hall of residence.
             n_amb: Number of ambassadors in the hall of residence.
-            width: Width of the grid representing the hall of residence.
-            height: Height of the grid representing the hall of residence.
             seed: Random seed for reproducibility.
         """
         
         super().__init__(seed=seed)
 
-        self.grid = OrthogonalMooreGrid((width, height), random=self.random)
+        G = build_graph_from_shapefile(gdf)
+        self.grid = NetworkGrid(G)
+        self.graph = G
+        self.node_list = list(G.nodes())
+
         self.num_students = n_stu
         self.num_ambassadors = n_amb
 
         self.students = Student.create_agents(model=self, n=self.num_students, 
-                    cell=self.random.choices(self.grid.all_cells.cells, 
+                    node=self.random.choices(self.node_list, 
                     k=self.num_students))
         self.ambassadors = Ambassador.create_agents(model=self, 
                     n=self.num_ambassadors, 
-                    cell=self.random.choices(self.grid.all_cells.cells, 
+                    node=self.random.choices(self.node_list, 
                     k=self.num_ambassadors))
 
-        self.data_collector = mesa.DataCollector(
-                                    agent_reporters={'sentiment': 'sentiment'})
-        self.data_collector.collect(self)
+        self.datacollector = mesa.DataCollector(
+            model_reporters={'Mean Sentiment': lambda m: np.mean([a.sentiment for a in m.students])},
+            agent_reporters={'sentiment': 'sentiment'})
+        self.datacollector.collect(self)
 
     def step(self):
         self.students.shuffle_do('step')
         self.ambassadors.shuffle_do('step')
 
 
-for _ in range(2):
+@solara.component
+def NetworkPlot(model):
+    G = model.graph
 
-    model1 = HallOfResidence(n_stu=200, n_amb=1, width=10, height=10, seed=None)
-    model1.run_until(60)
-    model2 = HallOfResidence(n_stu=200, n_amb=2, width=10, height=10, seed=None)
-    model2.run_until(60)
-    model3 = HallOfResidence(n_stu=200, n_amb=3, width=10, height=10, seed=None)
-    model3.run_until(60)
+    fig, ax = plt.subplots(figsize=(10, 8))
 
-data1 = model1.data_collector.get_agent_vars_dataframe()
-data2 = model2.data_collector.get_agent_vars_dataframe()
-data3 = model3.data_collector.get_agent_vars_dataframe()
+    # Draw edges (roads)
+    for u, v in G.edges():
+        ax.plot([u[0], v[0]], [u[1], v[1]], color='gray', linewidth=0.5, zorder=1)
 
-g1 = sns.histplot(data1['sentiment'], binwidth=0.1, binrange=(0, 1))
-g1.set(title='Sentiment distribution', xlabel='Sentiment', 
-       ylabel='No. of students')
-plt.show()
-g2 = sns.histplot(data2['sentiment'], binwidth=0.1, binrange=(0, 1))
-g2.set(title='Sentiment distribution', xlabel='Sentiment',  
-       ylabel='No. of students')
-plt.show()
-g3 = sns.histplot(data3['sentiment'], binwidth=0.1, binrange=(0, 1))
-g3.set(title='Sentiment distribution', xlabel='Sentiment',
-         ylabel='No. of students')
-plt.show()
+    # Draw agents coloured by sentiment
+    for agent in model.agents:
+        if isinstance(agent, Ambassador):
+            color = 'black'
+        elif agent.sentiment < 0.25:
+            color = 'red'
+        elif agent.sentiment > 0.75:
+            color = 'green'
+        else:
+            color = 'orange'
+        ax.scatter(agent.node[0], agent.node[1], c=color, s=20, zorder=2)
 
-print('Model variants have finished running.')
+    ax.set_aspect('equal')
+    ax.axis('off')
+    solara.FigureMatplotlib(fig)
+    plt.close(fig)
+
+
+model_params = {
+    'n_stu': {
+        'type': 'SliderInt',
+        'value': 50,
+        'label': 'Number of students',
+        'min': 10,
+        'max': 500,
+        'step': 1,
+    },
+    'n_amb': {
+        'type': 'SliderInt',
+        'value': 1,
+        'label': 'Number of ambassadors',
+        'min': 0,
+        'max': 10,
+        'step': 1,
+    },
+}
+
+model = HallOfResidence(n_stu=50, n_amb=1, seed=None)
+
+print('Model has finished running.')
+
+page = SolaraViz(model=model,
+                 components=[NetworkPlot, make_plot_component('Mean Sentiment')],
+                 model_params=model_params,
+                 name='Uni of Manchester ABM'
+)
