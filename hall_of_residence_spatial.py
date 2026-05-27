@@ -14,6 +14,8 @@ import solara
 import mesa
 from mesa.space import NetworkGrid
 from mesa.visualization import SolaraViz, make_plot_component
+from mesa.visualization.utils import update_counter
+from matplotlib.collections import LineCollection
 
 gdf = gpd.read_file("C:\\Users\\stacea\\abm-exploration\\UoM_road_shapefiles\\OpenRoads_UniOfManchester.shp")
 gdf = gdf.explode(index_parts=False).reset_index(drop=True) # Explode MultiLineStrings into LineStrings
@@ -143,31 +145,41 @@ class HallOfResidence(mesa.Model):
     def step(self):
         self.students.shuffle_do('step')
         self.ambassadors.shuffle_do('step')
+        self.datacollector.collect(self)
 
 
 @solara.component
 def NetworkPlot(model):
+    update_counter.value  # Subscribe to Mesa's step counter to re-render on each step
+
     G = model.graph
+
+    # Cache edge segments — the road network never changes between steps
+    edge_segments = solara.use_memo(
+        lambda: [[(u[0], u[1]), (v[0], v[1])] for u, v in G.edges()],
+        dependencies=[]
+    )
 
     fig, ax = plt.subplots(figsize=(10, 8))
 
-    # Draw edges (roads)
-    for u, v in G.edges():
-        ax.plot([u[0], v[0]], [u[1], v[1]], color='gray', linewidth=0.5, zorder=1)
+    # Draw all edges in a single LineCollection instead of one ax.plot() per edge
+    lc = LineCollection(edge_segments, colors='gray', linewidths=0.5, zorder=1)
+    ax.add_collection(lc)
 
-    # Draw agents coloured by sentiment
-    for agent in model.agents:
-        if isinstance(agent, Ambassador):
-            color = 'black'
-        elif agent.sentiment < 0.25:
-            color = 'red'
-        elif agent.sentiment > 0.75:
-            color = 'green'
-        else:
-            color = 'orange'
-        ax.scatter(agent.node[0], agent.node[1], c=color, s=20, zorder=2)
+    # Draw all agents in a single scatter call
+    xs = [a.node[0] for a in model.agents]
+    ys = [a.node[1] for a in model.agents]
+    colors = [
+        'black' if isinstance(a, Ambassador)
+        else 'red' if a.sentiment < 0.25
+        else 'green' if a.sentiment > 0.75
+        else 'orange'
+        for a in model.agents
+    ]
+    ax.scatter(xs, ys, c=colors, s=20, zorder=2)
 
     ax.set_aspect('equal')
+    ax.autoscale()  # Required after add_collection to fit the axes to the data
     ax.axis('off')
     solara.FigureMatplotlib(fig)
     plt.close(fig)
