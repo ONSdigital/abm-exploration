@@ -5,8 +5,6 @@ ambassadors that have a positive influence on sentiment.
 """
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
-import pandas as pd
 import geopandas as gpd
 import networkx as nx
 import solara
