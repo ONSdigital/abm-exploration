@@ -8,6 +8,5 @@
 *.tmp
 # Documents 
 *.docx
-# Shapefiles
-student_sentiment/WD_DEC_2025_UK_BFC_-465095694429775414/
+# OS OpenRoad Shapefiles
 student_sentiment/UoM_road_shapefiles/
