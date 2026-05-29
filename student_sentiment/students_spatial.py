@@ -15,7 +15,7 @@ from mesa.visualization import SolaraViz, make_plot_component
 from mesa.visualization.utils import update_counter
 from matplotlib.collections import LineCollection
 
-gdf = gpd.read_file("C:\\Users\\stacea\\abm-exploration\\UoM_road_shapefiles\\OpenRoads_UniOfManchester.shp")
+gdf = gpd.read_file("C:\\Users\\stacea\\abm-exploration\\student_sentiment\\UoM_road_shapefiles\\OpenRoads_UniOfManchester.shp")
 gdf = gdf.explode(index_parts=False).reset_index(drop=True) # Explode MultiLineStrings into LineStrings
 print(gdf.geom_type.value_counts()) # Should be 'LineString'
 print(gdf.crs) # Checks coordinate system
@@ -341,8 +341,7 @@ model_params = {
         'max': 100.0,
         'step': 1.0,
     },
-    # Fixed value (no widget) — Mesa passes this directly to the constructor
-    # on every reset. Change the string here to switch the home road.
+    # Road where student spawn bias is centralised.
     'home_road': 'Oxford Road',
     # Road where ambassadors spawn exclusively. Use a list for multiple roads,
     # e.g. ['Oxford Road', 'Wilmslow Road']. None = same as students.
