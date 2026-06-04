@@ -1,0 +1,87 @@
+# Cloud Build pipeline for containerizing this repository and
+# pushing the image to Artifact Registry.
+#
+# Usage (direct submit):
+# gcloud builds submit --config student_sentiment/cloudbuild.yaml \
+#   --substitutions=_LOCATION=europe-west2,_REPOSITORY=counts-test,_IMAGE_NAME=student-sentiment .
+#
+# Usage (manual trigger run):
+# gcloud builds triggers run student-sentiment --branch=main --region=europe-west2
+#
+# After build, this pipeline also deploys to Cloud Run Jobs by creating or
+# updating the job named ${_JOB_NAME} in ${_RUN_REGION}.
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    id: Build image
+    args:
+      - build
+      - -f
+      - student_sentiment/Dockerfile
+      - -t
+      - ${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$BUILD_ID
+      - -t
+      - ${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:latest
+      - student_sentiment
+
+  - name: gcr.io/cloud-builders/docker
+    id: Push build-id tag
+    args:
+      - push
+      - ${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$BUILD_ID
+
+  - name: gcr.io/cloud-builders/docker
+    id: Push latest tag
+    args:
+      - push
+      - ${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:latest
+
+  - name: gcr.io/cloud-builders/docker
+    id: Tag and push short-sha when available
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [ -n "$SHORT_SHA" ]; then
+          docker tag ${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$BUILD_ID ${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$SHORT_SHA
+          docker push ${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$SHORT_SHA
+        else
+          echo "SHORT_SHA is empty; skipping short-sha tag."
+        fi
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    id: Deploy Cloud Run Job
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        IMAGE="${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$BUILD_ID"
+        if gcloud run jobs describe "${_JOB_NAME}" --region "${_RUN_REGION}" --project "$PROJECT_ID" >/dev/null 2>&1; then
+          echo "Updating existing Cloud Run job ${_JOB_NAME}"
+          gcloud run jobs update "${_JOB_NAME}" \
+            --image "$$IMAGE" \
+            --region "${_RUN_REGION}" \
+            --project "$PROJECT_ID" \
+            --quiet
+        else
+          echo "Creating new Cloud Run job ${_JOB_NAME}"
+          gcloud run jobs create "${_JOB_NAME}" \
+            --image "$$IMAGE" \
+            --region "${_RUN_REGION}" \
+            --project "$PROJECT_ID" \
+            --quiet
+        fi
+
+images:
+  - ${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$BUILD_ID
+  - ${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:latest
+
+substitutions:
+  _LOCATION: europe-west2
+  _RUN_REGION: europe-west2
+  _REPOSITORY: counts-test
+  _IMAGE_NAME: student-sentiment
+  _JOB_NAME: student-sentiment-job
+
+options:
+  logging: CLOUD_LOGGING_ONLY

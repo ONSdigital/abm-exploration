@@ -8,14 +8,16 @@ import matplotlib.pyplot as plt
 import geopandas as gpd
 import networkx as nx
 import solara
-
 import mesa
+from pathlib import Path
+
 from mesa.space import NetworkGrid
 from mesa.visualization import SolaraViz, make_plot_component
 from mesa.visualization.utils import update_counter
 from matplotlib.collections import LineCollection
 
-gdf = gpd.read_file("C:\\Users\\stacea\\abm-exploration\\student_sentiment\\UoM_road_shapefiles\\OpenRoads_UniOfManchester.shp")
+_DATA_PATH = Path(__file__).resolve().parent / "UoM_road_shapefiles" / "OpenRoads_UniOfManchester.shp"
+gdf = gpd.read_file(_DATA_PATH)
 gdf = gdf.explode(index_parts=False).reset_index(drop=True) # Explode MultiLineStrings into LineStrings
 print(gdf.geom_type.value_counts()) # Should be 'LineString'
 print(gdf.crs) # Checks coordinate system
