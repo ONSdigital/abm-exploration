@@ -7,12 +7,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY requirements.txt /app/requirements.txt
+COPY student_sentiment/requirements.txt /app/requirements.txt
 
 RUN pip install --upgrade pip && pip install -r /app/requirements.txt
 
-COPY students_spatial.py /app/students_spatial.py
-COPY UoM_road_shapefiles /app/UoM_road_shapefiles
+COPY student_sentiment/students_spatial.py /app/students_spatial.py
+COPY student_sentiment/UoM_road_shapefiles /app/UoM_road_shapefiles
 
 # Run as a non-root user for better container security.
 RUN useradd -m appuser && chown -R appuser:appuser /app

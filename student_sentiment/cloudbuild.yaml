@@ -17,12 +17,12 @@ steps:
     args:
       - build
       - -f
-      - Dockerfile
+      - student_sentiment/Dockerfile
       - -t
       - ${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$BUILD_ID
       - -t
       - ${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:latest
-      - student_sentiment
+      - .
 
   - name: gcr.io/cloud-builders/docker
     id: Push build-id tag
