@@ -1,0 +1,6 @@
+numpy==2.4.4
+matplotlib==3.10.8
+geopandas==1.1.1
+networkx==3.6.1
+Mesa==3.5.1
+solara==1.57.4
