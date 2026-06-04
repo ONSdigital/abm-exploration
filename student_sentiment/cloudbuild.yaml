@@ -17,7 +17,7 @@ steps:
     args:
       - build
       - -f
-      - student_sentiment/Dockerfile
+      - Dockerfile
       - -t
       - ${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$BUILD_ID
       - -t
