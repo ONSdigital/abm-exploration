@@ -60,10 +60,14 @@ steps:
           echo "Updating existing Cloud Run service ${_SERVICE_NAME}"
           gcloud run services update "${_SERVICE_NAME}" \
             --image "$$IMAGE" \
-            --allow-unauthenticated \
             --region "${_RUN_REGION}" \
             --project "$PROJECT_ID" \
             --quiet
+          gcloud run services add-iam-policy-binding "${_SERVICE_NAME}" \
+            --region "${_RUN_REGION}" \
+            --project "$PROJECT_ID" \
+            --member="allUsers" \
+            --role="roles/run.invoker"
         else
           echo "Creating new Cloud Run service ${_SERVICE_NAME}"
           gcloud run services create "${_SERVICE_NAME}" \
