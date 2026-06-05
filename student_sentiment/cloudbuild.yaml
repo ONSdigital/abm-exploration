@@ -3,7 +3,7 @@
 #
 # Usage (direct submit):
 # gcloud builds submit --config student_sentiment/cloudbuild.yaml \
-#   --substitutions=_LOCATION=europe-west2,_REPOSITORY=counts-test,_IMAGE_NAME=student-sentiment .
+#   --substitutions=_LOCATION=europe-west2,_REPOSITORY=counts-test,_IMAGE_NAME=student-sentiment student_sentiment
 #
 # Usage (manual trigger run):
 # gcloud builds triggers run student-sentiment --branch=main --region=europe-west2
@@ -22,7 +22,7 @@ steps:
       - ${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$BUILD_ID
       - -t
       - ${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:latest
-      - .
+      - student_sentiment
 
   - name: gcr.io/cloud-builders/docker
     id: Push build-id tag
