@@ -393,4 +393,4 @@ model_params = {
 
 print('Model has finished running.')
 
-page = Page()
+page = Page
