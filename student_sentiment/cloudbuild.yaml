@@ -62,6 +62,7 @@ steps:
             --image "$$IMAGE" \
             --region "${_RUN_REGION}" \
             --project "$PROJECT_ID" \
+            --max-instances=1 \
             --quiet
         else
           echo "Creating new Cloud Run service ${_SERVICE_NAME}"
@@ -69,6 +70,7 @@ steps:
             --image "$$IMAGE" \
             --region "${_RUN_REGION}" \
             --project "$PROJECT_ID" \
+            --max-instances=1 \
             --quiet
         fi
 
