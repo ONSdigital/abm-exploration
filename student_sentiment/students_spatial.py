@@ -9,6 +9,7 @@ import geopandas as gpd
 import networkx as nx
 import solara
 import mesa
+import traceback
 from pathlib import Path
 
 from mesa.space import NetworkGrid
@@ -315,37 +316,47 @@ def NetworkPlot(model):
 @solara.component
 def Page():
     model = solara.use_reactive(None)
+    init_error = solara.use_reactive(None)
 
     def init_model():
-        gdf, _NAME_COL = load_road_data()
-        # ^Explode MultiLineStrings into LineStrings
-        print(gdf.geom_type.value_counts()) # Should be 'LineString'
-        print(gdf.crs) # Checks coordinate system
-        print(f"Shapefile columns: {gdf.columns.tolist()}")
+        try:
+            gdf, _NAME_COL = load_road_data()
+            # ^Explode MultiLineStrings into LineStrings
+            print(gdf.geom_type.value_counts()) # Should be 'LineString'
+            print(gdf.crs) # Checks coordinate system
+            print(f"Shapefile columns: {gdf.columns.tolist()}")
 
-        if _NAME_COL:
-            road_names = sorted(gdf[_NAME_COL].dropna().unique().tolist())
-            print(f"Using '{_NAME_COL}' as road name column — {len(road_names)}"
-                  f" named roads found. Pass one of these as home_road= in"
-                  f" HallOfResidence().")
-            print(road_names)
+            if _NAME_COL:
+                road_names = sorted(gdf[_NAME_COL].dropna().unique().tolist())
+                print(f"Using '{_NAME_COL}' as road name column — {len(road_names)}"
+                      f" named roads found. Pass one of these as home_road= in"
+                      f" HallOfResidence().")
+                print(road_names)
 
-        else:
-            road_names = []
-            print("Warning: no road name column found — home_road spawning "
-                  "unavailable.")
+            else:
+                road_names = []
+                print("Warning: no road name column found — home_road spawning "
+                      "unavailable.")
 
-        m = HallOfResidence(n_stu=50, 
-                            n_amb=1,
-                            straight_bias=2.0,
-                            home_road='Oxford Road',
-                            seed=None,
-                            gdf=gdf,
-                            _NAME_COL=_NAME_COL)
-        
-        model.value = m
+            m = HallOfResidence(n_stu=50,
+                                n_amb=1,
+                                straight_bias=2.0,
+                                home_road='Oxford Road',
+                                seed=None,
+                                gdf=gdf,
+                                _NAME_COL=_NAME_COL)
+
+            model.value = m
+            init_error.value = None
+        except Exception as exc:
+            init_error.value = f"{type(exc).__name__}: {exc}"
+            print("Model initialization failed:")
+            print(traceback.format_exc())
 
     solara.use_effect(init_model, dependencies=[])
+
+    if init_error.value is not None:
+        return solara.Markdown(f"Initialization failed: `{init_error.value}`")
 
     if model.value is None:
         return solara.HTML("Initializing model...")

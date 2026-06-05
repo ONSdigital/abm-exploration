@@ -63,6 +63,8 @@ steps:
             --region "${_RUN_REGION}" \
             --project "$PROJECT_ID" \
             --max-instances=1 \
+            --concurrency=1 \
+            --timeout=3600 \
             --quiet
         else
           echo "Creating new Cloud Run service ${_SERVICE_NAME}"
@@ -71,6 +73,8 @@ steps:
             --region "${_RUN_REGION}" \
             --project "$PROJECT_ID" \
             --max-instances=1 \
+            --concurrency=1 \
+            --timeout=3600 \
             --quiet
         fi
 
