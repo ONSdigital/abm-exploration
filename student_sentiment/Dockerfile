@@ -18,4 +18,4 @@ COPY UoM_road_shapefiles /app/UoM_road_shapefiles
 RUN useradd -m appuser && chown -R appuser:appuser /app
 USER appuser
 
-CMD ["python", "-u", "students_spatial.py"]
+CMD ["sh", "-c", "solara run students_spatial.py --host 0.0.0.0 --port $PORT"]
