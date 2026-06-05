@@ -16,36 +16,13 @@ from mesa.visualization import SolaraViz, make_plot_component
 from mesa.visualization.utils import update_counter
 from matplotlib.collections import LineCollection
 
-_DATA_PATH = Path(__file__).resolve().parent / "UoM_road_shapefiles" / "OpenRoads_UniOfManchester.shp"
-gdf = gpd.read_file(_DATA_PATH)
-gdf = gdf.explode(index_parts=False).reset_index(drop=True) # Explode MultiLineStrings into LineStrings
-print(gdf.geom_type.value_counts()) # Should be 'LineString'
-print(gdf.crs) # Checks coordinate system
-print(f"Shapefile columns: {gdf.columns.tolist()}")
 
-# Identify the road name column — OS OpenRoads SHP files use 'roadName';
-# GeoPackage versions sometimes use 'name1'. Fall back to the first text column.
-_NAME_COL_CANDIDATES = ['roadName', 'name1', 'road_name', 'NAME', 'name']
-_NAME_COL = next((c for c in _NAME_COL_CANDIDATES if c in gdf.columns), None)
-if _NAME_COL is None:
-    _obj_cols = gdf.select_dtypes('object').columns
-    _NAME_COL = _obj_cols[0] if len(_obj_cols) else None
-if _NAME_COL:
-    road_names = sorted(gdf[_NAME_COL].dropna().unique().tolist())
-    print(f"Using '{_NAME_COL}' as road name column — {len(road_names)} named "
-          f"roads found. Pass one of these as home_road= in HallOfResidence().")
-    print(road_names)
-else:
-    road_names = []
-    print("Warning: no road name column found — home_road spawning unavailable.")
-
-
-def get_road_nodes(G, road_name):
+def get_road_nodes(G, road_name, gdf, name_col):
     """
     Returns all nodes in the road graph that lie on roads whose name contains 
     road_name.
     """
-    matches = gdf[gdf[_NAME_COL].str.contains(road_name, case=False, na=False)]
+    matches = gdf[gdf[name_col].str.contains(road_name, case=False, na=False)]
     nodes = set()
     for _, row in matches.iterrows():
         for coord in row.geometry.coords:
@@ -181,7 +158,8 @@ class HallOfResidence(mesa.Model):
     ambassadors.
     """
     def __init__(self, n_stu, n_amb, straight_bias=2.0, home_road='', 
-                 home_road_weight=20.0, amb_road=None, seed=None):
+                 home_road_weight=20.0, amb_road=None, seed=None, gdf=None, 
+                 _NAME_COL=None):
         """
         Initialises the spatial hall of residence model.
 
@@ -214,10 +192,13 @@ class HallOfResidence(mesa.Model):
         self.num_ambassadors = n_amb
         self.straight_bias = straight_bias
 
+        self.gdf = gdf
+        self._NAME_COL = _NAME_COL
+
         # Build spawn weights biased towards home_road if specified
         spawn_weights = None
         if home_road:
-            road_nodes = set(get_road_nodes(G, home_road))
+            road_nodes = set(get_road_nodes(G, home_road, gdf, _NAME_COL))
             if road_nodes:
                 spawn_weights = [
                     home_road_weight if n in road_nodes else 1.0
@@ -242,7 +223,7 @@ class HallOfResidence(mesa.Model):
             amb_nodes = list({
                 node
                 for road in amb_road
-                for node in get_road_nodes(G, road)
+                for node in get_road_nodes(G, road, gdf, _NAME_COL)
             })
             if amb_nodes:
                 print(f"Ambassador roads {amb_road}: {len(amb_nodes)} "
@@ -310,6 +291,65 @@ def NetworkPlot(model):
     plt.close(fig)
 
 
+@solara.component
+def Page():
+    model = solara.use_reactive(None)
+
+    def init_model():
+
+        _DATA_PATH = Path(__file__).resolve().parent / "UoM_road_shapefiles" / "OpenRoads_UniOfManchester.shp"
+        gdf = gpd.read_file(_DATA_PATH)
+        gdf = gdf.explode(index_parts=False).reset_index(drop=True) 
+        # ^Explode MultiLineStrings into LineStrings
+        print(gdf.geom_type.value_counts()) # Should be 'LineString'
+        print(gdf.crs) # Checks coordinate system
+        print(f"Shapefile columns: {gdf.columns.tolist()}")
+
+        # Identify the road name column — OS OpenRoads SHP files use 'roadName'
+        # GeoPackage versions sometimes use 'name1'. Fall back to the first text column.
+        _NAME_COL_CANDIDATES = ['roadName', 'name1', 'road_name', 'NAME', 
+                                'name']
+        _NAME_COL = next((c for c in _NAME_COL_CANDIDATES if c in gdf.columns), 
+                         None)
+        
+        if _NAME_COL is None:
+            _obj_cols = gdf.select_dtypes('object').columns
+            _NAME_COL = _obj_cols[0] if len(_obj_cols) else None
+
+        if _NAME_COL:
+            road_names = sorted(gdf[_NAME_COL].dropna().unique().tolist())
+            print(f"Using '{_NAME_COL}' as road name column — {len(road_names)}"
+                  f" named roads found. Pass one of these as home_road= in"
+                  f" HallOfResidence().")
+            print(road_names)
+
+        else:
+            road_names = []
+            print("Warning: no road name column found — home_road spawning "
+                  "unavailable.")
+
+        m = HallOfResidence(n_stu=50, 
+                            n_amb=1,
+                            straight_bias=2.0,
+                            home_road='Oxford Road',
+                            seed=None,
+                            gdf=gdf,
+                            _NAME_COL=_NAME_COL)
+        
+        model.value = m
+
+    solara.use_effect(init_model, dependencies=[])
+
+    if model.value is None:
+        return solara.HTML("Initializing model...")
+    
+    return SolaraViz(model=model.value,
+                     components=[NetworkPlot, 
+                                 make_plot_component('Mean Sentiment')],
+                     model_params=model_params,
+                        name='Uni of Manchester ABM')
+
+
 model_params = {
     'n_stu': {
         'type': 'SliderInt',
@@ -350,16 +390,7 @@ model_params = {
     'amb_road': ['Oxford Road', 'Lime Grove', 'Burlington Street'],
 }
 
-model = HallOfResidence(n_stu=50, 
-                        n_amb=1, 
-                        straight_bias=2.0, 
-                        seed=None,
-                        home_road='Oxford Road')
 
 print('Model has finished running.')
 
-page = SolaraViz(model=model,
-                 components=[NetworkPlot, make_plot_component('Mean Sentiment')],
-                 model_params=model_params,
-                 name='Uni of Manchester ABM'
-)
+page = Page()
