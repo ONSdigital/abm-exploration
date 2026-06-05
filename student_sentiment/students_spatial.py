@@ -17,6 +17,24 @@ from mesa.visualization.utils import update_counter
 from matplotlib.collections import LineCollection
 
 
+def load_road_data():
+    """
+    Load the road shapefile and detect the best road-name column.
+    """
+    data_path = Path(__file__).resolve().parent / "UoM_road_shapefiles" / "OpenRoads_UniOfManchester.shp"
+    gdf = gpd.read_file(data_path)
+    gdf = gdf.explode(index_parts=False).reset_index(drop=True)
+
+    # Identify the road name column used by the loaded dataset.
+    name_col_candidates = ['roadName', 'name1', 'road_name', 'NAME', 'name']
+    name_col = next((c for c in name_col_candidates if c in gdf.columns), None)
+    if name_col is None:
+        obj_cols = gdf.select_dtypes('object').columns
+        name_col = obj_cols[0] if len(obj_cols) else None
+
+    return gdf, name_col
+
+
 def get_road_nodes(G, road_name, gdf, name_col):
     """
     Returns all nodes in the road graph that lie on roads whose name contains 
@@ -183,6 +201,9 @@ class HallOfResidence(mesa.Model):
         
         super().__init__(seed=seed)
 
+        if gdf is None:
+            gdf, _NAME_COL = load_road_data()
+
         G = build_graph_from_shapefile(gdf)
         self.grid = NetworkGrid(G)
         self.graph = G
@@ -296,25 +317,11 @@ def Page():
     model = solara.use_reactive(None)
 
     def init_model():
-
-        _DATA_PATH = Path(__file__).resolve().parent / "UoM_road_shapefiles" / "OpenRoads_UniOfManchester.shp"
-        gdf = gpd.read_file(_DATA_PATH)
-        gdf = gdf.explode(index_parts=False).reset_index(drop=True) 
+        gdf, _NAME_COL = load_road_data()
         # ^Explode MultiLineStrings into LineStrings
         print(gdf.geom_type.value_counts()) # Should be 'LineString'
         print(gdf.crs) # Checks coordinate system
         print(f"Shapefile columns: {gdf.columns.tolist()}")
-
-        # Identify the road name column — OS OpenRoads SHP files use 'roadName'
-        # GeoPackage versions sometimes use 'name1'. Fall back to the first text column.
-        _NAME_COL_CANDIDATES = ['roadName', 'name1', 'road_name', 'NAME', 
-                                'name']
-        _NAME_COL = next((c for c in _NAME_COL_CANDIDATES if c in gdf.columns), 
-                         None)
-        
-        if _NAME_COL is None:
-            _obj_cols = gdf.select_dtypes('object').columns
-            _NAME_COL = _obj_cols[0] if len(_obj_cols) else None
 
         if _NAME_COL:
             road_names = sorted(gdf[_NAME_COL].dropna().unique().tolist())
