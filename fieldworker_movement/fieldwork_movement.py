@@ -13,6 +13,7 @@ import mesa
 import traceback
 from pathlib import Path
 
+from shapely.ops import nearest_points
 from mesa.space import NetworkGrid
 from mesa.visualization import SolaraViz, make_plot_component
 from mesa.visualization.utils import update_counter
@@ -88,13 +89,31 @@ class FieldWorker(mesa.Agent):
         """
         Placeholder for movement logic.
         """
+        # Field worker should move to the next unoccupied house - check copilot
+        # for advice on how to do this. 
+
+        # Remember to add something at the end of the day for them to 
+
+    def arrive(self):
+        """
+        Governs the time a field worker spends between moving to an address and 
+        actually knocking on the door. Could include checking address, walking
+        up to the door, etc.
+        """
+        # This distribution should have a long tail, and a peak at about 0-20
+        # seconds.
+        arrival_rng = np.random.Generator
+        arrival_time = arrival_rng.lognormal(mean=5, sigma=20)
+        # This time is in SECONDS, might have to change later on. 
+        return arrival_time
 
     def knock(self):
         """
         Placeholder for the logic where a field worker knocks on a household's
         door. They may or may not answer.
         """
-        # Include the time the worker has to wait in this part.
+        # Include some sort of probability of someone in the house answering
+        # the door.
 
     def interaction(self):
         """
@@ -107,12 +126,21 @@ class FieldWorker(mesa.Agent):
         Whole process of a field worker visiting a household: knocking, waiting
         for a response, then interacting if someone opens the door.
         """
+        self.arrive()
         answered = self.knock()
 
         if answered:
             self.interaction()
 
-    
+    def back_home(self):
+        """
+        Field staff travel back home (assign some random direction to them, or
+        back to some nearby car park/train station from where they finished 
+        would be very clever.
+        """
+        # Field worker should visit a couple of houses that didn't answer the 
+        # door to them during the day on their way back.
+
     def step(self):
 
         self.move()
@@ -142,3 +170,7 @@ class FieldWorkModel():
         # Placeholder for a method that updates the state of the model at each time step
         for worker in self.workers:
             worker.step()
+
+
+    # Could have a one-off end of day method that sends field staff back to one
+    # or two houses that didn't answer
