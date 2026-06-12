@@ -50,6 +50,22 @@ model_params = {
         'max': 10,
         'step': 1,
     },
+    'interaction_chance_amb': {
+        'type': 'SliderFloat',
+        'value': 0.20,
+        'label': 'Probability of student-ambassador interaction',
+        'min': 0.0,
+        'max': 1.0,
+        'step': 0.05,
+    },
+    'interaction_chance_stu': {
+        'type': 'SliderFloat',
+        'value': 0.10,
+        'label': 'Probability of student-student interaction',
+        'min': 0.0,
+        'max': 1.0,
+        'step': 0.05,
+    },
     'straight_bias': {
         'type': 'SliderFloat',
         'value': 2.0,
@@ -142,7 +158,8 @@ try:
     _CACHED_GDF, _CACHED_NAME_COL = load_road_data()
     _CACHED_GRAPH = build_graph_from_shapefile(_CACHED_GDF)
 except Exception as _e:
-    print(f"FATAL: Failed to load road data at startup: {type(_e).__name__}: {_e}")
+    print(f"FATAL: Failed to load road data at startup: "
+          f"{type(_e).__name__}: {_e}")
     raise
 
 
@@ -211,7 +228,8 @@ class Student(mesa.Agent):
         is an ambassador, the sentiment is increased by a fixed amount.
 
         Sentiment only transferred to another student/ambassador in the same
-        node.
+        node. There is a 10% chance of interacting with another student and a
+        20% chance of interacting with an ambassador.
         """
         other_people = [a for a in self.model.grid.get_cell_list_contents([
             self.node]) if a is not self]
@@ -219,10 +237,12 @@ class Student(mesa.Agent):
         if other_people:
             person = self.random.choice(other_people)
             if isinstance(person, Ambassador):
-                self.sentiment = min(1, self.sentiment + 
-                                     self.model.amb_increase)
+                if self.random.random() < self.model.interaction_chance_amb:
+                    self.sentiment = min(1, self.sentiment + 
+                                         self.model.amb_increase)
             else:
-                self.sentiment = (self.sentiment + person.sentiment) / 2
+                if self.random.random() < self.model.interaction_chance_stu:
+                    self.sentiment = (self.sentiment + person.sentiment) / 2
 
     def step(self):
         self.move()
@@ -360,7 +380,7 @@ def NetworkPlot(model):
 
     G = model.graph
 
-    # Cache edge segments — the road network never changes between steps
+    # Cache edge segments — the road network doesn't reload between steps
     edge_segments = solara.use_memo(
         lambda: [[(u[0], u[1]), (v[0], v[1])] for u, v in G.edges()],
         dependencies=[]
