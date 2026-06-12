@@ -17,12 +17,70 @@ from mesa.visualization import SolaraViz, make_plot_component
 from mesa.visualization.utils import update_counter
 from matplotlib.collections import LineCollection
 
+model_params = {
+    'n_stu': {
+        'type': 'SliderInt',
+        'value': 50,
+        'label': 'Number of students',
+        'min': 10,
+        'max': 500,
+        'step': 1,
+    },
+    'amb_sentiment': {
+        'type': 'SliderFloat',
+        'value': 0.9,
+        'label': 'Ambassador sentiment',
+        'min': 0.0,
+        'max': 1.0,
+        'step': 0.05,
+    },
+    'amb_increase': {
+        'type': 'SliderFloat',
+        'value': 0.25,
+        'label': 'Sentiment increase when student meets ambassador',
+        'min': 0.0,
+        'max': 1.0,
+        'step': 0.05,
+    },
+    'n_amb': {
+        'type': 'SliderInt',
+        'value': 1,
+        'label': 'Number of ambassadors',
+        'min': 0,
+        'max': 10,
+        'step': 1,
+    },
+    'straight_bias': {
+        'type': 'SliderFloat',
+        'value': 2.0,
+        'label': 'Straight-line bias',
+        'min': 0.0,
+        'max': 10.0,
+        'step': 0.5,
+    },
+    'home_road_weight': {
+        'type': 'SliderFloat',
+        'value': 20.0,
+        'label': 'Home road spawn weight',
+        'min': 1.0,
+        'max': 100.0,
+        'step': 1.0,
+    },
+    # Road where student spawn bias is centralised.
+    'home_road': 'Oxford Road',
+    # Road where ambassadors spawn exclusively. Use a list for multiple roads,
+    # e.g. ['Oxford Road', 'Wilmslow Road']. None = same as students.
+    'amb_road': ['Oxford Road', 'Lime Grove', 'Burlington Street'],
+}
 
 def load_road_data():
     """
     Load the road shapefile and detect the best road-name column.
     """
     data_path = Path(__file__).resolve().parent / "UoM_road_shapefiles" / "OpenRoads_UniOfManchester.shp"
+    print(f"Loading shapefile from: {data_path}")
+    if not data_path.exists():
+        raise FileNotFoundError(f"Shapefile not found: {data_path}")
     gdf = gpd.read_file(data_path)
     gdf = gdf.explode(index_parts=False).reset_index(drop=True)
 
@@ -32,6 +90,13 @@ def load_road_data():
     if name_col is None:
         obj_cols = gdf.select_dtypes('object').columns
         name_col = obj_cols[0] if len(obj_cols) else None
+
+    if name_col is None:
+        print("Warning: no road name column found — home_road and amb_road "
+              "spawning will be unavailable. Available columns: "
+              f"{gdf.columns.tolist()}")
+    else:
+        print(f"Road name column: '{name_col}'")
 
     return gdf, name_col
 
@@ -50,7 +115,6 @@ def get_road_nodes(G, road_name, gdf, name_col):
     return list(nodes)
 
 
-# Building a graph, where LineStrings are edges and endpoints are nodes
 def build_graph_from_shapefile(gdf):
     """
     Builds a graph that matches the road layout on the shapefile. Made out of
@@ -64,12 +128,22 @@ def build_graph_from_shapefile(gdf):
             G.add_node(end, pos=end)
             G.add_edge(start, end, length=row.geometry.length)
 
-    G = G.subgraph(max(nx.connected_components(G), key=len))
+    G = G.subgraph(max(nx.connected_components(G), key=len)).copy()
 
     print(f"Nodes: {G.number_of_nodes()}, Edges: {G.number_of_edges()}")
     print(f"Connected components: {nx.number_connected_components(G)}")
 
     return G
+
+
+# Road data and graph loaded once at module level to avoid repeated disk reads
+# on each model reset (e.g. when Solara rebuilds the model from slider changes).
+try:
+    _CACHED_GDF, _CACHED_NAME_COL = load_road_data()
+    _CACHED_GRAPH = build_graph_from_shapefile(_CACHED_GDF)
+except Exception as _e:
+    print(f"FATAL: Failed to load road data at startup: {type(_e).__name__}: {_e}")
+    raise
 
 
 class Student(mesa.Agent):
@@ -130,7 +204,6 @@ class Student(mesa.Agent):
         self.model.grid.move_agent(self, new_node)
         self.node = new_node
 
-
     def interaction(self):
         """
         Student interacts with a random other student, and their sentiment 
@@ -140,17 +213,17 @@ class Student(mesa.Agent):
         Sentiment only transferred to another student/ambassador in the same
         node.
         """
-        other_person = [a for a in self.model.grid.get_cell_list_contents([
+        other_people = [a for a in self.model.grid.get_cell_list_contents([
             self.node]) if a is not self]
 
-        if other_person:
-            person = self.random.choice(other_person)
+        if other_people:
+            person = self.random.choice(other_people)
             if isinstance(person, Ambassador):
-                self.sentiment = min(1, self.sentiment + 0.25)
+                self.sentiment = min(1, self.sentiment + 
+                                     self.model.amb_increase)
             else:
                 self.sentiment = (self.sentiment + person.sentiment) / 2
 
-    
     def step(self):
         self.move()
         self.interaction()
@@ -166,7 +239,7 @@ class Ambassador(mesa.Agent):
         super().__init__(model)
 
         self.node = node
-        self.sentiment = 0.9
+        self.sentiment = self.model.amb_sentiment
 
         model.grid.place_agent(self, node)
 
@@ -198,14 +271,20 @@ class HallOfResidence(mesa.Model):
                 Nodes from all listed roads are pooled together. None or empty
                 list falls back to the same spawn weights as students.
             seed: Random seed for reproducibility.
+            gdf: Optional GeoDataFrame containing the road data. If None, it will
+                be loaded from the default shapefile.
+            _NAME_COL: Optional name of the column in gdf that contains road names.
+                 If None, it will be auto-detected from common candidates or any
+                 object-type column.
         """
         
         super().__init__(seed=seed)
 
         if gdf is None:
-            gdf, _NAME_COL = load_road_data()
+            gdf = _CACHED_GDF
+            _NAME_COL = _CACHED_NAME_COL
 
-        G = build_graph_from_shapefile(gdf)
+        G = _CACHED_GRAPH if gdf is _CACHED_GDF else build_graph_from_shapefile(gdf)
         self.grid = NetworkGrid(G)
         self.graph = G
         self.node_list = list(G.nodes())
@@ -272,7 +351,6 @@ class HallOfResidence(mesa.Model):
 
     def step(self):
         self.students.shuffle_do('step')
-        self.ambassadors.shuffle_do('step')
         self.datacollector.collect(self)
 
 
@@ -295,15 +373,14 @@ def NetworkPlot(model):
     ax.add_collection(lc)
 
     # Draw all agents in a single scatter call
-    xs = [a.node[0] for a in model.agents]
-    ys = [a.node[1] for a in model.agents]
-    colors = [
-        'black' if isinstance(a, Ambassador)
-        else 'red' if a.sentiment < 0.25
-        else 'green' if a.sentiment > 0.75
-        else 'orange'
+    xs, ys, colors = zip(*[
+        (a.node[0], a.node[1],
+         'black' if isinstance(a, Ambassador)
+         else 'red' if a.sentiment < 0.25
+         else 'green' if a.sentiment > 0.75
+         else 'orange')
         for a in model.agents
-    ]
+    ])
     ax.scatter(xs, ys, c=colors, s=20, zorder=2)
 
     ax.set_aspect('equal')
@@ -320,31 +397,11 @@ def Page():
 
     def init_model():
         try:
-            gdf, _NAME_COL = load_road_data()
-            # ^Explode MultiLineStrings into LineStrings
-            print(gdf.geom_type.value_counts()) # Should be 'LineString'
-            print(gdf.crs) # Checks coordinate system
-            print(f"Shapefile columns: {gdf.columns.tolist()}")
-
-            if _NAME_COL:
-                road_names = sorted(gdf[_NAME_COL].dropna().unique().tolist())
-                print(f"Using '{_NAME_COL}' as road name column — {len(road_names)}"
-                      f" named roads found. Pass one of these as home_road= in"
-                      f" HallOfResidence().")
-                print(road_names)
-
-            else:
-                road_names = []
-                print("Warning: no road name column found — home_road spawning "
-                      "unavailable.")
-
             m = HallOfResidence(n_stu=50,
                                 n_amb=1,
                                 straight_bias=2.0,
                                 home_road='Oxford Road',
-                                seed=None,
-                                gdf=gdf,
-                                _NAME_COL=_NAME_COL)
+                                seed=None)
 
             model.value = m
             init_error.value = None
@@ -366,49 +423,5 @@ def Page():
                                  make_plot_component('Mean Sentiment')],
                      model_params=model_params,
                         name='Uni of Manchester ABM')
-
-
-model_params = {
-    'n_stu': {
-        'type': 'SliderInt',
-        'value': 50,
-        'label': 'Number of students',
-        'min': 10,
-        'max': 500,
-        'step': 1,
-    },
-    'n_amb': {
-        'type': 'SliderInt',
-        'value': 1,
-        'label': 'Number of ambassadors',
-        'min': 0,
-        'max': 10,
-        'step': 1,
-    },
-    'straight_bias': {
-        'type': 'SliderFloat',
-        'value': 2.0,
-        'label': 'Straight-line bias',
-        'min': 0.0,
-        'max': 10.0,
-        'step': 0.5,
-    },
-    'home_road_weight': {
-        'type': 'SliderFloat',
-        'value': 20.0,
-        'label': 'Home road spawn weight',
-        'min': 1.0,
-        'max': 100.0,
-        'step': 1.0,
-    },
-    # Road where student spawn bias is centralised.
-    'home_road': 'Oxford Road',
-    # Road where ambassadors spawn exclusively. Use a list for multiple roads,
-    # e.g. ['Oxford Road', 'Wilmslow Road']. None = same as students.
-    'amb_road': ['Oxford Road', 'Lime Grove', 'Burlington Street'],
-}
-
-
-print('Model has finished running.')
 
 page = Page
