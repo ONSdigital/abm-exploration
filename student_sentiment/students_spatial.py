@@ -69,7 +69,7 @@ model_params = {
     'interaction_chance_amb': {
         'type': 'SliderFloat',
         'value': 0.20,
-        'label': 'Probability of student-ambassador interaction',
+        'label': 'Prob: stu-amb interaction',
         'min': 0.0,
         'max': 1.0,
         'step': 0.05,
@@ -77,7 +77,7 @@ model_params = {
     'interaction_chance_stu': {
         'type': 'SliderFloat',
         'value': 0.10,
-        'label': 'Probability of student-student interaction',
+        'label': 'Prob: stu-stu interaction',
         'min': 0.0,
         'max': 1.0,
         'step': 0.05,
