@@ -479,7 +479,7 @@ def Page():
     if model.value is None:
         return solara.HTML("Initializing model...")
 
-    solara.Style(".v-navigation-drawer { min-width: 380px !important; width: 380px !important; }")
+    solara.Style(".v-navigation-drawer { min-width: 450px !important; width: 450px !important; }")
     return SolaraViz(model=model.value,
                      components=[NetworkPlot, 
                                  make_plot_component('Mean Sentiment')],
