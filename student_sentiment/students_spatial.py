@@ -98,6 +98,14 @@ model_params = {
         'max': 100.0,
         'step': 1.0,
     },
+    'decay_delay': {
+        'type': 'SliderInt',
+        'value': 20,
+        'label': 'Steps before sentiment decays',
+        'min': 0,
+        'max': 500,
+        'step': 5,
+    },
     # Road where student spawn bias is centralised.
     'home_road': 'Oxford Road',
     # Road where ambassadors spawn exclusively. Use a list for multiple roads,
@@ -263,6 +271,7 @@ class Student(mesa.Agent):
                     if 0.75 < self.sentiment <= 1:
                         self.sentiment = min(1, self.sentiment + 
                                             self.model.amb_small_increase)
+                    self.age = 0
             else:
                 if self.random.random() < self.model.interaction_chance_stu:
                     avg = (self.sentiment + person.sentiment) / 2
@@ -272,8 +281,11 @@ class Student(mesa.Agent):
     def sentiment_decay(self):
         """
         Student sentiment decays over time, very gradually decreasing.
+        Decay only begins after the student has existed for decay_delay steps.
         """
-        self.sentiment = self.sentiment * 0.99
+        self.age += 1
+        if self.age > self.model.decay_delay:
+            self.sentiment = self.sentiment * 0.99
 
     def step(self):
         self.move()
@@ -304,7 +316,7 @@ class HallOfResidence(mesa.Model):
     def __init__(self, n_stu, n_amb, amb_sentiment=0.9, amb_large_increase=0.25,
                  amb_medium_increase=0.15, amb_small_increase=0.05,
                  interaction_chance_amb=0.20, interaction_chance_stu=0.10,
-                 straight_bias=2.0, home_road='', 
+                 straight_bias=2.0, home_road='', decay_delay=20,
                  home_road_weight=20.0, amb_road=None, seed=None, gdf=None, 
                  _NAME_COL=None):
         """
@@ -321,6 +333,8 @@ class HallOfResidence(mesa.Model):
                 spawn probability than all other nodes. Empty string disables.
             home_road_weight: Relative spawn weight for home_road nodes vs
                 the rest of the network.
+            decay_delay: Number of steps a student's sentiment remains fixed
+                before per-step decay begins. 0 = decay from step 1.
             amb_road: List of road names (or partial names) where ambassadors
                 spawn exclusively, e.g. ['Oxford Road', 'Wilmslow Road'].
                 Nodes from all listed roads are pooled together. None or empty
@@ -353,6 +367,7 @@ class HallOfResidence(mesa.Model):
         self.interaction_chance_amb = interaction_chance_amb
         self.interaction_chance_stu = interaction_chance_stu
         self.straight_bias = straight_bias
+        self.decay_delay = decay_delay
 
         self.gdf = gdf
         self._NAME_COL = _NAME_COL
