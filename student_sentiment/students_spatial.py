@@ -259,13 +259,13 @@ class Student(mesa.Agent):
                 if self.random.random() < self.model.interaction_chance_amb:
                     if self.sentiment <= 0.5:
                         self.sentiment = min(1, self.sentiment + 
-                                            self.model.amb__large_increase)
+                                            self.model.amb_large_increase)
                     if 0.5 < self.sentiment <= 0.75:
                         self.sentiment = min(1, self.sentiment + 
-                                            self.model.amb__medium_increase)
+                                            self.model.amb_medium_increase)
                     if 0.75 < self.sentiment <= 1:
                         self.sentiment = min(1, self.sentiment + 
-                                            self.model.amb__small_increase)
+                                            self.model.amb_small_increase)
             else:
                 if self.random.random() < self.model.interaction_chance_stu:
                     avg = (self.sentiment + person.sentiment) / 2
@@ -304,7 +304,10 @@ class HallOfResidence(mesa.Model):
     A university hall of residence, with a certain number of students and 
     ambassadors.
     """
-    def __init__(self, n_stu, n_amb, straight_bias=2.0, home_road='', 
+    def __init__(self, n_stu, n_amb, amb_sentiment=0.9, amb_large_increase=0.25,
+                 amb_medium_increase=0.15, amb_small_increase=0.05,
+                 interaction_chance_amb=0.20, interaction_chance_stu=0.10,
+                 straight_bias=2.0, home_road='', 
                  home_road_weight=20.0, amb_road=None, seed=None, gdf=None, 
                  _NAME_COL=None):
         """
@@ -346,6 +349,12 @@ class HallOfResidence(mesa.Model):
 
         self.num_students = n_stu
         self.num_ambassadors = n_amb
+        self.amb_sentiment = amb_sentiment
+        self.amb_large_increase = amb_large_increase
+        self.amb_medium_increase = amb_medium_increase
+        self.amb_small_increase = amb_small_increase
+        self.interaction_chance_amb = interaction_chance_amb
+        self.interaction_chance_stu = interaction_chance_stu
         self.straight_bias = straight_bias
 
         self.gdf = gdf
