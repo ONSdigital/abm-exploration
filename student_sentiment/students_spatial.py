@@ -193,10 +193,11 @@ class Student(mesa.Agent):
     student can be influenced by other students, and by student ambassadors, to 
     change their sentiment.
     """
-    def __init__(self, model, node):
+    def __init__(self, model, node, age):
         super().__init__(model)
 
         self.node = node
+        self.age = age
         self.prev_node = None
         self.sentiment = min(1, max(0, self.random.gauss(0.5, sigma=0.1)))
         model.grid.place_agent(self, node)
