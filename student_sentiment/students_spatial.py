@@ -37,8 +37,7 @@ model_params = {
     'amb_large_increase': {
         'type': 'SliderFloat',
         'value': 0.25,
-        'label': 'Sentiment increase when a low sentiment student meets \
-            an ambassador',
+        'label': 'Amb. boost: low sentiment student',
         'min': 0.2,
         'max': 0.5,
         'step': 0.05,
@@ -46,8 +45,7 @@ model_params = {
     'amb_medium_increase': {
         'type': 'SliderFloat',
         'value': 0.15,
-        'label': 'Sentiment increase when a medium sentiment student meets \
-            an ambassador',
+        'label': 'Amb. boost: medium sentiment student',
         'min': 0.1,
         'max': 0.3,
         'step': 0.05,
@@ -55,8 +53,7 @@ model_params = {
     'amb_small_increase': {
         'type': 'SliderFloat',
         'value': 0.05,
-        'label': 'Sentiment increase when a high sentiment student meets \
-            an ambassador',
+        'label': 'Amb. boost: high sentiment student',
         'min': 0.0,
         'max': 0.2,
         'step': 0.05,
@@ -481,7 +478,8 @@ def Page():
 
     if model.value is None:
         return solara.HTML("Initializing model...")
-    
+
+    solara.Style(".v-navigation-drawer { min-width: 380px !important; width: 380px !important; }")
     return SolaraViz(model=model.value,
                      components=[NetworkPlot, 
                                  make_plot_component('Mean Sentiment')],
