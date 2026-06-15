@@ -193,7 +193,7 @@ class Student(mesa.Agent):
     student can be influenced by other students, and by student ambassadors, to 
     change their sentiment.
     """
-    def __init__(self, model, node, age):
+    def __init__(self, model, node, age=0):
         super().__init__(model)
 
         self.node = node
