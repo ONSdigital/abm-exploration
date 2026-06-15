@@ -34,12 +34,31 @@ model_params = {
         'max': 1.0,
         'step': 0.05,
     },
-    'amb_increase': {
+    'amb_large_increase': {
         'type': 'SliderFloat',
         'value': 0.25,
-        'label': 'Sentiment increase when student meets ambassador',
+        'label': 'Sentiment increase when a low sentiment student meets \
+            an ambassador',
+        'min': 0.2,
+        'max': 0.5,
+        'step': 0.05,
+    },
+    'amb_medium_increase': {
+        'type': 'SliderFloat',
+        'value': 0.15,
+        'label': 'Sentiment increase when a medium sentiment student meets \
+            an ambassador',
+        'min': 0.1,
+        'max': 0.3,
+        'step': 0.05,
+    },
+    'amb_small_increase': {
+        'type': 'SliderFloat',
+        'value': 0.05,
+        'label': 'Sentiment increase when a high sentiment student meets \
+            an ambassador',
         'min': 0.0,
-        'max': 1.0,
+        'max': 0.2,
         'step': 0.05,
     },
     'n_amb': {
@@ -174,7 +193,7 @@ class Student(mesa.Agent):
 
         self.node = node
         self.prev_node = None
-        self.sentiment = self.random.uniform(0, 1)
+        self.sentiment = min(1, max(0, self.random.gauss(0.5, sigma=0.1)))
         model.grid.place_agent(self, node)
 
     def move(self):
@@ -238,15 +257,31 @@ class Student(mesa.Agent):
             person = self.random.choice(other_people)
             if isinstance(person, Ambassador):
                 if self.random.random() < self.model.interaction_chance_amb:
-                    self.sentiment = min(1, self.sentiment + 
-                                         self.model.amb_increase)
+                    if self.sentiment <= 0.5:
+                        self.sentiment = min(1, self.sentiment + 
+                                            self.model.amb__large_increase)
+                    if 0.5 < self.sentiment <= 0.75:
+                        self.sentiment = min(1, self.sentiment + 
+                                            self.model.amb__medium_increase)
+                    if 0.75 < self.sentiment <= 1:
+                        self.sentiment = min(1, self.sentiment + 
+                                            self.model.amb__small_increase)
             else:
                 if self.random.random() < self.model.interaction_chance_stu:
-                    self.sentiment = (self.sentiment + person.sentiment) / 2
+                    avg = (self.sentiment + person.sentiment) / 2
+                    self.sentiment = avg
+                    person.sentiment = avg
+
+    def sentiment_decay(self):
+        """
+        Student sentiment decays over time, very gradually decreasing.
+        """
+        self.sentiment = self.sentiment * 0.99
 
     def step(self):
         self.move()
         self.interaction()
+        self.sentiment_decay()
 
 
 class Ambassador(mesa.Agent):
