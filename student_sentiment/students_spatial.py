@@ -168,6 +168,7 @@ def build_graph_from_shapefile(gdf):
             G.add_node(end, pos=end)
             G.add_edge(start, end, length=row.geometry.length)
 
+    # Gets rid of all useless nodes - only keeps largest connected component 
     G = G.subgraph(max(nx.connected_components(G), key=len)).copy()
 
     print(f"Nodes: {G.number_of_nodes()}, Edges: {G.number_of_edges()}")
@@ -232,15 +233,7 @@ class Student(mesa.Agent):
                     cos_sim = (dx * ndx + dy * ndy) / (fwd_len * nb_len) if nb_len else 0.0
                     weights.append(max(0.01, 1.0 + cos_sim * bias))
 
-                total = sum(weights)
-                r = self.random.random() * total
-                cumulative = 0.0
-                new_node = neighbors[-1]
-                for nb, w in zip(neighbors, weights):
-                    cumulative += w
-                    if r <= cumulative:
-                        new_node = nb
-                        break
+                new_node = self.random.choices(neighbors, weights=weights, k=1)[0]
 
         self.prev_node = self.node
         self.model.grid.move_agent(self, new_node)
@@ -248,13 +241,14 @@ class Student(mesa.Agent):
 
     def interaction(self):
         """
-        Student interacts with a random other student, and their sentiment 
+        Student interacts with a random other student, and their sentiments 
         becomes the average sentiment of the two students. If the other student 
-        is an ambassador, the sentiment is increased by a fixed amount.
+        is an ambassador, the sentiment is increased by a fixed amount, 
+        depending on what the student's initial sentiment was.
 
         Sentiment only transferred to another student/ambassador in the same
-        node. There is a 10% chance of interacting with another student and a
-        20% chance of interacting with an ambassador.
+        node. The likelihood of interacting with another student or an 
+        ambassador is adjustable in the model sidebar.
         """
         other_people = [a for a in self.model.grid.get_cell_list_contents([
             self.node]) if a is not self]
@@ -266,10 +260,10 @@ class Student(mesa.Agent):
                     if self.sentiment <= 0.5:
                         self.sentiment = min(1, self.sentiment + 
                                             self.model.amb_large_increase)
-                    if 0.5 < self.sentiment <= 0.75:
+                    elif 0.5 < self.sentiment <= 0.75:
                         self.sentiment = min(1, self.sentiment + 
                                             self.model.amb_medium_increase)
-                    if 0.75 < self.sentiment <= 1:
+                    elif 0.75 < self.sentiment <= 1:
                         self.sentiment = min(1, self.sentiment + 
                                             self.model.amb_small_increase)
                     self.age = 0
@@ -286,7 +280,7 @@ class Student(mesa.Agent):
         """
         self.age += 1
         if self.age > self.model.decay_delay:
-            self.sentiment = self.sentiment * 0.99
+            self.sentiment = self.sentiment * 0.995
 
     def step(self):
         self.move()
@@ -394,6 +388,7 @@ class HallOfResidence(mesa.Model):
 
         # Ambassadors spawn exclusively on amb_road roads if specified;
         # otherwise they use the same spawn weights as students.
+        amb_nodes = []
         if amb_road:
             # Accept a bare string for convenience, normalise to list
             if isinstance(amb_road, str):
@@ -406,13 +401,12 @@ class HallOfResidence(mesa.Model):
             if amb_nodes:
                 print(f"Ambassador roads {amb_road}: {len(amb_nodes)} "
                       f"nodes total.")
-                amb_spawn = self.random.choices(amb_nodes, 
-                                                k=self.num_ambassadors)
             else:
                 print(f"Warning: no nodes found for amb_road {amb_road}, "
                       f"falling back to student spawn weights.")
-                amb_spawn = self.random.choices(self.node_list,
-                    weights=spawn_weights, k=self.num_ambassadors)
+
+        if amb_nodes:
+            amb_spawn = self.random.choices(amb_nodes, k=self.num_ambassadors)
         else:
             amb_spawn = self.random.choices(self.node_list,
                     weights=spawn_weights, k=self.num_ambassadors)
