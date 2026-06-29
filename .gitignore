@@ -8,6 +8,6 @@
 *.tmp
 # Documents 
 *.docx
-# OS OpenRoad Shapefiles
+# Shapefiles
 student_sentiment/UoM_road_shapefiles/
-fieldworker_movement/binley_road_shapefiles/
+fieldworker_movement/newcastle_upon_tyne_shapefiles/
