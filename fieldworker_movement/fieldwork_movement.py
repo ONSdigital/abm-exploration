@@ -6,6 +6,7 @@ Aaron Stace, 08/06/2026
 """
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
 import geopandas as gpd
 import network as nx
 import solara
@@ -20,22 +21,46 @@ from mesa.visualization.utils import update_counter
 from matplotlib.collections import LineCollection
 
 
-def load_road_data():
+model_params = {
+    'n_field_staff': {
+        'type': 'SliderInt',
+        'value': 5,
+        'label': 'No. of field staff',
+        'min': 1,
+        'max': 20,
+        'step': 1,
+    },
+    'hh_response_chance': {
+        'type': 'SliderInt',
+        'value': 0.5,
+        'label': 'P(household responds to knock)',
+        'min': 0,
+        'max': 1,
+    },
+    'walking_speed': {
+        'type'
+    }
+}
+
+
+def load_network_data():
     """
-    Load the road shapefile and detect the best road-name column.
+    Load the Newcastle road and path geopackage files, tag each with a 'type'
+    edge attribute ('road' or 'path'), and return them as a single combined
+    GeoDataFrame.
     """
-    data_path = Path(__file__).resolve().parent / "UoM_road_shapefiles" / "OpenRoads_UniOfManchester.shp"
-    gdf = gpd.read_file(data_path)
+    base_path = Path(__file__).resolve().parent / "newcastle_upon_tyne_shapefiles"
+
+    gdf_roads = gpd.read_file(base_path / "Roads" / "Newcastle_Upon_Tyne_Roads.gpkg")
+    gdf_roads['type'] = 'road'
+
+    gdf_paths = gpd.read_file(base_path / "Paths" / "Newcastle_Upon_Tyne_Paths.gpkg")
+    gdf_paths['type'] = 'path'
+
+    gdf = pd.concat([gdf_roads, gdf_paths], ignore_index=True)
     gdf = gdf.explode(index_parts=False).reset_index(drop=True)
 
-    # Identify the road name column used by the loaded dataset.
-    name_col_candidates = ['roadName', 'name1', 'road_name', 'NAME', 'name']
-    name_col = next((c for c in name_col_candidates if c in gdf.columns), None)
-    if name_col is None:
-        obj_cols = gdf.select_dtypes('object').columns
-        name_col = obj_cols[0] if len(obj_cols) else None
-
-    return gdf, name_col
+    return gdf
 
 
 def get_road_nodes(G, road_name, gdf, name_col):
@@ -58,14 +83,21 @@ def build_graph_from_shapefile(gdf):
     'nodes' and 'edges'. Edges are LineStrings, and nodes are their endpoints.
     """
     G = nx.Graph()
-    for _, row in gdf.iterrows():
-        coords = list(row.geometry.coords)
-        for start, end in zip(coords[:-1], coords[1:]):
-            G.add_node(start, pos=start)
-            G.add_node(end, pos=end)
-            G.add_edge(start, end, length=row.geometry.length)
 
-    G = G.subgraph(max(nx.connected_components(G), key=len))
+    edge_list = []
+    for row in gdf.itertuples(index=False):
+        coords = list(row.geometry.coords)
+        edge_len = row.geometry.length
+        edge_type = row.type
+        edge_list.extend(
+            (start, end, {'length': edge_len, 'type': edge_type})
+            for start, end in zip(coords[:-1], coords[1:])
+        )
+
+    G.add_edges_from(edge_list)
+    nx.set_node_attributes(G, {node: node for node in G.nodes}, 'pos')
+
+    G = G.subgraph(max(nx.connected_components(G), key=len)).copy()
 
     print(f"Nodes: {G.number_of_nodes()}, Edges: {G.number_of_edges()}")
     print(f"Connected components: {nx.number_connected_components(G)}")
@@ -92,11 +124,11 @@ class FieldWorker(mesa.Agent):
         # Field worker should move to the next unoccupied house - check copilot
         # for advice on how to do this. 
 
-        # Remember to add something at the end of the day for them to 
 
+    # Maybe not necessary to include this
     def arrive(self):
         """
-        Governs the time a field worker spends between moving to an address and 
+        Governs the time a field worker spends between getting to an address and 
         actually knocking on the door. Could include checking address, walking
         up to the door, etc.
         """
@@ -114,12 +146,17 @@ class FieldWorker(mesa.Agent):
         """
         # Include some sort of probability of someone in the house answering
         # the door.
+        # We presumably have some data regarding what proportion of people 
+        # answer the door to field staff?
+        # If not in, put in a postcard. Does this prompt a response? Does it 
+        # annoy them? 
 
     def interaction(self):
         """
         Placeholder for the logic where a field worker interacts with a 
         household member.
         """
+        # Longer could mean higher P of success
 
     def visit_household(self):
         """
@@ -139,7 +176,9 @@ class FieldWorker(mesa.Agent):
         would be very clever.
         """
         # Field worker should visit a couple of houses that didn't answer the 
-        # door to them during the day on their way back.
+        # door to them during the day on their way back. Undecided as to how
+        # this should be implemented.
+        # Will vary depending on location, e.g. Westminster vs rural.
 
     def step(self):
 
@@ -147,30 +186,51 @@ class FieldWorker(mesa.Agent):
         self.visit_household()
 
 
-class Household():
+class NoOfHours(FieldWorker):
+    """
+    A subclass of the FieldWorker class that represents a certain number of
+    hours per day that this type of field worker will do.
+    """
+    # Will need more than one of these eventually
+    def __init__(self, model, node, hours_per_day):
+        super().__init__(model, node)
+
+
+class Household(mesa.Agent):
     """
     MAYBE HAVE THESE AT THE HOUSE POINTS ON THE MAP. Might have to overlay the 
     road map with one containing house numbers or something, and then have the 
     field work agents visit each house.
     """
+    # Start with one type of household. Maybe have another household class that inherits later on?
+    def __init__(self, model):
+
+        super().__init__(model)
+
+        self.hh_sentiment = hh_sent
+        self.response_chance = response_chance
 
 
-class FieldWorkModel():
+class FieldWorkModel(mesa.Model):
     """
     The model of field work operations, which includes a number of field
     workers and the geographic area they operate within.
     """
 
     def __init__(self, num_workers, area):
+        
+        super().__init__(seed=seed)
+
         self.workers = [FieldWorker(i, self.random_location(
                                             area)) for i in range(num_workers)]
         self.area = area
 
+        self.field_staff = FieldWorker.create_agents(model=self, 
+                                                    n=self.num_field_staff)
+                                                    #also something about nodes) 
+
     def step(self):
-        # Placeholder for a method that updates the state of the model at each time step
-        for worker in self.workers:
-            worker.step()
-
-
-    # Could have a one-off end of day method that sends field staff back to one
-    # or two houses that didn't answer
+        self.field_staff.shuffle_do('step')
+        # Probably needs a step for data collection as well
+        # Could have a one-off end of day method that sends field staff back to one
+        # or two houses that didn't answer
