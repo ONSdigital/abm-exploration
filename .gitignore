@@ -8,6 +8,17 @@
 *.tmp
 # Documents 
 *.docx
+# Shapefiles
+student_sentiment/UoM_road_shapefiles/
+fieldworker_movement/newcastle_upon_tyne_shapefiles/
+# Cached files
+fieldworker_movement/__pycache__/
+# Any excel files
+*.xlsx
+# Network graph images to check functionality
+fieldworker_movement/network_graphs/
+# Address files
+fieldworker_movement/addresses/
 # Shapefile extra stuff
 /student_sentiment/UoM_road_shapefiles/openroads_extracted/
 
