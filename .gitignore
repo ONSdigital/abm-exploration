@@ -17,3 +17,5 @@ fieldworker_movement/__pycache__/
 *.xlsx
 # Network graph images to check functionality
 fieldworker_movement/network_graphs/
+# Test address files
+*.txt
