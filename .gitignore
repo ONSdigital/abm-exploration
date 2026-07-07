@@ -19,3 +19,8 @@ fieldworker_movement/__pycache__/
 fieldworker_movement/network_graphs/
 # Address files
 fieldworker_movement/addresses/
+# Shapefile extra stuff
+/student_sentiment/UoM_road_shapefiles/openroads_extracted/
+
+# Binley shapefiles MIGHT NEED TO COMMIT THESE FOR GCP JOB
+/fieldworker_movement/binley_road_shapefiles/

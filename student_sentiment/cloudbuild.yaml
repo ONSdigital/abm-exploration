@@ -1,0 +1,93 @@
+# Cloud Build pipeline for containerizing this repository and
+# pushing the image to Artifact Registry.
+#
+# Usage (direct submit):
+# gcloud builds submit --config student_sentiment/cloudbuild.yaml \
+#   --substitutions=_LOCATION=europe-west2,_REPOSITORY=counts-test,_IMAGE_NAME=student-sentiment student_sentiment
+#
+# Usage (manual trigger run):
+# gcloud builds triggers run student-sentiment --branch=main --region=europe-west2
+#
+# After build, this pipeline also deploys to Cloud Run Services by creating or
+# updating the service named ${_SERVICE_NAME} in ${_RUN_REGION}.
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    id: Build image
+    args:
+      - build
+      - -f
+      - student_sentiment/Dockerfile
+      - -t
+      - ${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$BUILD_ID
+      - -t
+      - ${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:latest
+      - student_sentiment
+
+  - name: gcr.io/cloud-builders/docker
+    id: Push build-id tag
+    args:
+      - push
+      - ${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$BUILD_ID
+
+  - name: gcr.io/cloud-builders/docker
+    id: Push latest tag
+    args:
+      - push
+      - ${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:latest
+
+  - name: gcr.io/cloud-builders/docker
+    id: Tag and push short-sha when available
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [ -n "$SHORT_SHA" ]; then
+          docker tag ${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$BUILD_ID ${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$SHORT_SHA
+          docker push ${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$SHORT_SHA
+        else
+          echo "SHORT_SHA is empty; skipping short-sha tag."
+        fi
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    id: Deploy Cloud Run Service
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        IMAGE="${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$BUILD_ID"
+        if gcloud run services describe "${_SERVICE_NAME}" --region "${_RUN_REGION}" --project "$PROJECT_ID" >/dev/null 2>&1; then
+          echo "Updating existing Cloud Run service ${_SERVICE_NAME}"
+          gcloud run services update "${_SERVICE_NAME}" \
+            --image "$$IMAGE" \
+            --region "${_RUN_REGION}" \
+            --project "$PROJECT_ID" \
+            --max-instances=100 \
+            --concurrency=50 \
+            --timeout=3600 \
+            --quiet
+        else
+          echo "Creating new Cloud Run service ${_SERVICE_NAME}"
+          gcloud run services create "${_SERVICE_NAME}" \
+            --image "$$IMAGE" \
+            --region "${_RUN_REGION}" \
+            --project "$PROJECT_ID" \
+            --max-instances=100 \
+            --concurrency=50 \
+            --timeout=3600 \
+            --quiet
+        fi
+
+images:
+  - ${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:$BUILD_ID
+  - ${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE_NAME}:latest
+
+substitutions:
+  _LOCATION: europe-west2
+  _RUN_REGION: europe-west2
+  _REPOSITORY: counts-test
+  _IMAGE_NAME: student-sentiment
+  _SERVICE_NAME: student-sentiment-service
+
+options:
+  logging: CLOUD_LOGGING_ONLY

@@ -8,42 +8,145 @@ import matplotlib.pyplot as plt
 import geopandas as gpd
 import networkx as nx
 import solara
-
 import mesa
+import traceback
+from pathlib import Path
+
 from mesa.space import NetworkGrid
 from mesa.visualization import SolaraViz, make_plot_component
 from mesa.visualization.utils import update_counter
 from matplotlib.collections import LineCollection
 
-gdf = gpd.read_file("C:\\Users\\stacea\\abm-exploration\\student_sentiment\\UoM_road_shapefiles\\OpenRoads_UniOfManchester.shp")
-gdf = gdf.explode(index_parts=False).reset_index(drop=True) # Explode MultiLineStrings into LineStrings
-print(gdf.geom_type.value_counts()) # Should be 'LineString'
-print(gdf.crs) # Checks coordinate system
-print(f"Shapefile columns: {gdf.columns.tolist()}")
+model_params = {
+    'n_stu': {
+        'type': 'SliderInt',
+        'value': 50,
+        'label': 'Number of students',
+        'min': 10,
+        'max': 500,
+        'step': 1,
+    },
+    'n_amb': {
+        'type': 'SliderInt',
+        'value': 1,
+        'label': 'Number of ambassadors',
+        'min': 0,
+        'max': 50,
+        'step': 1,
+    },
+    'interaction_chance_amb': {
+        'type': 'SliderFloat',
+        'value': 0.20,
+        'label': 'Prob: stu-amb interaction',
+        'min': 0.0,
+        'max': 1.0,
+        'step': 0.05,
+    },
+    'interaction_chance_stu': {
+        'type': 'SliderFloat',
+        'value': 0.10,
+        'label': 'Prob: stu-stu interaction',
+        'min': 0.0,
+        'max': 1.0,
+        'step': 0.05,
+    },
+    'amb_sentiment': {
+        'type': 'SliderFloat',
+        'value': 0.9,
+        'label': 'Ambassador sentiment',
+        'min': 0.0,
+        'max': 1.0,
+        'step': 0.05,
+    },
+    'amb_large_increase': {
+        'type': 'SliderFloat',
+        'value': 0.25,
+        'label': 'Amb. boost: low sentiment student',
+        'min': 0.2,
+        'max': 0.5,
+        'step': 0.05,
+    },
+    'amb_medium_increase': {
+        'type': 'SliderFloat',
+        'value': 0.15,
+        'label': 'Amb. boost: medium sentiment student',
+        'min': 0.1,
+        'max': 0.3,
+        'step': 0.05,
+    },
+    'amb_small_increase': {
+        'type': 'SliderFloat',
+        'value': 0.05,
+        'label': 'Amb. boost: high sentiment student',
+        'min': 0.0,
+        'max': 0.2,
+        'step': 0.05,
+    },
+    'straight_bias': {
+        'type': 'SliderFloat',
+        'value': 2.0,
+        'label': 'Straight-line bias',
+        'min': 0.0,
+        'max': 10.0,
+        'step': 0.5,
+    },
+    'home_road_weight': {
+        'type': 'SliderFloat',
+        'value': 20.0,
+        'label': 'Home road spawn weight',
+        'min': 1.0,
+        'max': 100.0,
+        'step': 1.0,
+    },
+    'decay_delay': {
+        'type': 'SliderInt',
+        'value': 20,
+        'label': 'Steps before sentiment decays',
+        'min': 0,
+        'max': 500,
+        'step': 5,
+    },
+    # Road where student spawn bias is centralised.
+    'home_road': 'Oxford Road',
+    # Road where ambassadors spawn exclusively. Use a list for multiple roads,
+    # e.g. ['Oxford Road', 'Wilmslow Road']. None = same as students.
+    'amb_road': ['Oxford Road', 'Lime Grove', 'Burlington Street'],
+}
 
-# Identify the road name column — OS OpenRoads SHP files use 'roadName';
-# GeoPackage versions sometimes use 'name1'. Fall back to the first text column.
-_NAME_COL_CANDIDATES = ['roadName', 'name1', 'road_name', 'NAME', 'name']
-_NAME_COL = next((c for c in _NAME_COL_CANDIDATES if c in gdf.columns), None)
-if _NAME_COL is None:
-    _obj_cols = gdf.select_dtypes('object').columns
-    _NAME_COL = _obj_cols[0] if len(_obj_cols) else None
-if _NAME_COL:
-    road_names = sorted(gdf[_NAME_COL].dropna().unique().tolist())
-    print(f"Using '{_NAME_COL}' as road name column — {len(road_names)} named "
-          f"roads found. Pass one of these as home_road= in HallOfResidence().")
-    print(road_names)
-else:
-    road_names = []
-    print("Warning: no road name column found — home_road spawning unavailable.")
+def load_road_data():
+    """
+    Load the road shapefile and detect the best road-name column.
+    """
+    data_path = Path(__file__).resolve().parent / "UoM_road_shapefiles" / "OpenRoads_UniOfManchester.shp"
+    print(f"Loading shapefile from: {data_path}")
+    if not data_path.exists():
+        raise FileNotFoundError(f"Shapefile not found: {data_path}")
+    gdf = gpd.read_file(data_path)
+    gdf = gdf.explode(index_parts=False).reset_index(drop=True)
+
+    # Identify the road name column used by the loaded dataset.
+    name_col_candidates = ['roadName', 'name1', 'road_name', 'NAME', 'name']
+    name_col = next((c for c in name_col_candidates if c in gdf.columns), None)
+    if name_col is None:
+        obj_cols = gdf.select_dtypes('object').columns
+        name_col = obj_cols[0] if len(obj_cols) else None
+
+    if name_col is None:
+        print("Warning: no road name column found — home_road and amb_road "
+              "spawning will be unavailable. Available columns: "
+              f"{gdf.columns.tolist()}")
+    else:
+        print(f"Road name column: '{name_col}'")
+
+    return gdf, name_col
 
 
-def get_road_nodes(G, road_name):
+def get_road_nodes(G, road_name, gdf, name_col):
     """
     Returns all nodes in the road graph that lie on roads whose name contains 
     road_name.
     """
-    matches = gdf[gdf[_NAME_COL].str.contains(road_name, case=False, na=False)]
+    matches = gdf[gdf[name_col].str.contains(road_name, case=False, na=False)]
     nodes = set()
     for _, row in matches.iterrows():
         for coord in row.geometry.coords:
@@ -52,7 +155,6 @@ def get_road_nodes(G, road_name):
     return list(nodes)
 
 
-# Building a graph, where LineStrings are edges and endpoints are nodes
 def build_graph_from_shapefile(gdf):
     """
     Builds a graph that matches the road layout on the shapefile. Made out of
@@ -66,12 +168,24 @@ def build_graph_from_shapefile(gdf):
             G.add_node(end, pos=end)
             G.add_edge(start, end, length=row.geometry.length)
 
-    G = G.subgraph(max(nx.connected_components(G), key=len))
+    # Gets rid of all useless nodes - only keeps largest connected component 
+    G = G.subgraph(max(nx.connected_components(G), key=len)).copy()
 
     print(f"Nodes: {G.number_of_nodes()}, Edges: {G.number_of_edges()}")
     print(f"Connected components: {nx.number_connected_components(G)}")
 
     return G
+
+
+# Road data and graph loaded once at module level to avoid repeated disk reads
+# on each model reset (e.g. when Solara rebuilds the model from slider changes).
+try:
+    _CACHED_GDF, _CACHED_NAME_COL = load_road_data()
+    _CACHED_GRAPH = build_graph_from_shapefile(_CACHED_GDF)
+except Exception as _e:
+    print(f"FATAL: Failed to load road data at startup: "
+          f"{type(_e).__name__}: {_e}")
+    raise
 
 
 class Student(mesa.Agent):
@@ -80,12 +194,13 @@ class Student(mesa.Agent):
     student can be influenced by other students, and by student ambassadors, to 
     change their sentiment.
     """
-    def __init__(self, model, node):
+    def __init__(self, model, node, age=0):
         super().__init__(model)
 
         self.node = node
+        self.age = age
         self.prev_node = None
-        self.sentiment = self.random.uniform(0, 1)
+        self.sentiment = min(1, max(0, self.random.gauss(0.5, sigma=0.1)))
         model.grid.place_agent(self, node)
 
     def move(self):
@@ -118,44 +233,59 @@ class Student(mesa.Agent):
                     cos_sim = (dx * ndx + dy * ndy) / (fwd_len * nb_len) if nb_len else 0.0
                     weights.append(max(0.01, 1.0 + cos_sim * bias))
 
-                total = sum(weights)
-                r = self.random.random() * total
-                cumulative = 0.0
-                new_node = neighbors[-1]
-                for nb, w in zip(neighbors, weights):
-                    cumulative += w
-                    if r <= cumulative:
-                        new_node = nb
-                        break
+                new_node = self.random.choices(neighbors, weights=weights, k=1)[0]
 
         self.prev_node = self.node
         self.model.grid.move_agent(self, new_node)
         self.node = new_node
 
-
     def interaction(self):
         """
-        Student interacts with a random other student, and their sentiment 
+        Student interacts with a random other student, and their sentiments 
         becomes the average sentiment of the two students. If the other student 
-        is an ambassador, the sentiment is increased by a fixed amount.
+        is an ambassador, the sentiment is increased by a fixed amount, 
+        depending on what the student's initial sentiment was.
 
         Sentiment only transferred to another student/ambassador in the same
-        node.
+        node. The likelihood of interacting with another student or an 
+        ambassador is adjustable in the model sidebar.
         """
-        other_person = [a for a in self.model.grid.get_cell_list_contents([
+        other_people = [a for a in self.model.grid.get_cell_list_contents([
             self.node]) if a is not self]
 
-        if other_person:
-            person = self.random.choice(other_person)
+        if other_people:
+            person = self.random.choice(other_people)
             if isinstance(person, Ambassador):
-                self.sentiment = min(1, self.sentiment + 0.25)
+                if self.random.random() < self.model.interaction_chance_amb:
+                    if self.sentiment <= 0.5:
+                        self.sentiment = min(1, self.sentiment + 
+                                            self.model.amb_large_increase)
+                    elif 0.5 < self.sentiment <= 0.75:
+                        self.sentiment = min(1, self.sentiment + 
+                                            self.model.amb_medium_increase)
+                    elif 0.75 < self.sentiment <= 1:
+                        self.sentiment = min(1, self.sentiment + 
+                                            self.model.amb_small_increase)
+                    self.age = 0
             else:
-                self.sentiment = (self.sentiment + person.sentiment) / 2
+                if self.random.random() < self.model.interaction_chance_stu:
+                    avg = (self.sentiment + person.sentiment) / 2
+                    self.sentiment = avg
+                    person.sentiment = avg
 
-    
+    def sentiment_decay(self):
+        """
+        Student sentiment decays over time, very gradually decreasing.
+        Decay only begins after the student has existed for decay_delay steps.
+        """
+        self.age += 1
+        if self.age > self.model.decay_delay:
+            self.sentiment = self.sentiment * 0.995
+
     def step(self):
         self.move()
         self.interaction()
+        self.sentiment_decay()
 
 
 class Ambassador(mesa.Agent):
@@ -168,7 +298,7 @@ class Ambassador(mesa.Agent):
         super().__init__(model)
 
         self.node = node
-        self.sentiment = 0.9
+        self.sentiment = self.model.amb_sentiment
 
         model.grid.place_agent(self, node)
 
@@ -178,8 +308,12 @@ class HallOfResidence(mesa.Model):
     A university hall of residence, with a certain number of students and 
     ambassadors.
     """
-    def __init__(self, n_stu, n_amb, straight_bias=2.0, home_road='', 
-                 home_road_weight=20.0, amb_road=None, seed=None):
+    def __init__(self, n_stu, n_amb, amb_sentiment=0.9, amb_large_increase=0.25,
+                 amb_medium_increase=0.15, amb_small_increase=0.05,
+                 interaction_chance_amb=0.20, interaction_chance_stu=0.10,
+                 straight_bias=2.0, home_road='', decay_delay=20,
+                 home_road_weight=20.0, amb_road=None, seed=None, gdf=None, 
+                 _NAME_COL=None):
         """
         Initialises the spatial hall of residence model.
 
@@ -194,28 +328,49 @@ class HallOfResidence(mesa.Model):
                 spawn probability than all other nodes. Empty string disables.
             home_road_weight: Relative spawn weight for home_road nodes vs
                 the rest of the network.
+            decay_delay: Number of steps a student's sentiment remains fixed
+                before per-step decay begins. 0 = decay from step 1.
             amb_road: List of road names (or partial names) where ambassadors
                 spawn exclusively, e.g. ['Oxford Road', 'Wilmslow Road'].
                 Nodes from all listed roads are pooled together. None or empty
                 list falls back to the same spawn weights as students.
             seed: Random seed for reproducibility.
+            gdf: Optional GeoDataFrame containing the road data. If None, it will
+                be loaded from the default shapefile.
+            _NAME_COL: Optional name of the column in gdf that contains road names.
+                 If None, it will be auto-detected from common candidates or any
+                 object-type column.
         """
         
         super().__init__(seed=seed)
 
-        G = build_graph_from_shapefile(gdf)
+        if gdf is None:
+            gdf = _CACHED_GDF
+            _NAME_COL = _CACHED_NAME_COL
+
+        G = _CACHED_GRAPH if gdf is _CACHED_GDF else build_graph_from_shapefile(gdf)
         self.grid = NetworkGrid(G)
         self.graph = G
         self.node_list = list(G.nodes())
 
         self.num_students = n_stu
         self.num_ambassadors = n_amb
+        self.amb_sentiment = amb_sentiment
+        self.amb_large_increase = amb_large_increase
+        self.amb_medium_increase = amb_medium_increase
+        self.amb_small_increase = amb_small_increase
+        self.interaction_chance_amb = interaction_chance_amb
+        self.interaction_chance_stu = interaction_chance_stu
         self.straight_bias = straight_bias
+        self.decay_delay = decay_delay
+
+        self.gdf = gdf
+        self._NAME_COL = _NAME_COL
 
         # Build spawn weights biased towards home_road if specified
         spawn_weights = None
         if home_road:
-            road_nodes = set(get_road_nodes(G, home_road))
+            road_nodes = set(get_road_nodes(G, home_road, gdf, _NAME_COL))
             if road_nodes:
                 spawn_weights = [
                     home_road_weight if n in road_nodes else 1.0
@@ -233,6 +388,7 @@ class HallOfResidence(mesa.Model):
 
         # Ambassadors spawn exclusively on amb_road roads if specified;
         # otherwise they use the same spawn weights as students.
+        amb_nodes = []
         if amb_road:
             # Accept a bare string for convenience, normalise to list
             if isinstance(amb_road, str):
@@ -240,18 +396,17 @@ class HallOfResidence(mesa.Model):
             amb_nodes = list({
                 node
                 for road in amb_road
-                for node in get_road_nodes(G, road)
+                for node in get_road_nodes(G, road, gdf, _NAME_COL)
             })
             if amb_nodes:
                 print(f"Ambassador roads {amb_road}: {len(amb_nodes)} "
                       f"nodes total.")
-                amb_spawn = self.random.choices(amb_nodes, 
-                                                k=self.num_ambassadors)
             else:
                 print(f"Warning: no nodes found for amb_road {amb_road}, "
                       f"falling back to student spawn weights.")
-                amb_spawn = self.random.choices(self.node_list,
-                    weights=spawn_weights, k=self.num_ambassadors)
+
+        if amb_nodes:
+            amb_spawn = self.random.choices(amb_nodes, k=self.num_ambassadors)
         else:
             amb_spawn = self.random.choices(self.node_list,
                     weights=spawn_weights, k=self.num_ambassadors)
@@ -267,7 +422,6 @@ class HallOfResidence(mesa.Model):
 
     def step(self):
         self.students.shuffle_do('step')
-        self.ambassadors.shuffle_do('step')
         self.datacollector.collect(self)
 
 
@@ -277,7 +431,7 @@ def NetworkPlot(model):
 
     G = model.graph
 
-    # Cache edge segments — the road network never changes between steps
+    # Cache edge segments — the road network doesn't reload between steps
     edge_segments = solara.use_memo(
         lambda: [[(u[0], u[1]), (v[0], v[1])] for u, v in G.edges()],
         dependencies=[]
@@ -290,15 +444,14 @@ def NetworkPlot(model):
     ax.add_collection(lc)
 
     # Draw all agents in a single scatter call
-    xs = [a.node[0] for a in model.agents]
-    ys = [a.node[1] for a in model.agents]
-    colors = [
-        'black' if isinstance(a, Ambassador)
-        else 'red' if a.sentiment < 0.25
-        else 'green' if a.sentiment > 0.75
-        else 'orange'
+    xs, ys, colors = zip(*[
+        (a.node[0], a.node[1],
+         'black' if isinstance(a, Ambassador)
+         else 'red' if a.sentiment < 0.25
+         else 'green' if a.sentiment > 0.75
+         else 'orange')
         for a in model.agents
-    ]
+    ])
     ax.scatter(xs, ys, c=colors, s=20, zorder=2)
 
     ax.set_aspect('equal')
@@ -308,56 +461,39 @@ def NetworkPlot(model):
     plt.close(fig)
 
 
-model_params = {
-    'n_stu': {
-        'type': 'SliderInt',
-        'value': 50,
-        'label': 'Number of students',
-        'min': 10,
-        'max': 500,
-        'step': 1,
-    },
-    'n_amb': {
-        'type': 'SliderInt',
-        'value': 1,
-        'label': 'Number of ambassadors',
-        'min': 0,
-        'max': 10,
-        'step': 1,
-    },
-    'straight_bias': {
-        'type': 'SliderFloat',
-        'value': 2.0,
-        'label': 'Straight-line bias',
-        'min': 0.0,
-        'max': 10.0,
-        'step': 0.5,
-    },
-    'home_road_weight': {
-        'type': 'SliderFloat',
-        'value': 20.0,
-        'label': 'Home road spawn weight',
-        'min': 1.0,
-        'max': 100.0,
-        'step': 1.0,
-    },
-    # Road where student spawn bias is centralised.
-    'home_road': 'Oxford Road',
-    # Road where ambassadors spawn exclusively. Use a list for multiple roads,
-    # e.g. ['Oxford Road', 'Wilmslow Road']. None = same as students.
-    'amb_road': ['Oxford Road', 'Lime Grove', 'Burlington Street'],
-}
+@solara.component
+def Page():
+    model = solara.use_reactive(None)
+    init_error = solara.use_reactive(None)
 
-model = HallOfResidence(n_stu=50, 
-                        n_amb=1, 
-                        straight_bias=2.0, 
-                        seed=None,
-                        home_road='Oxford Road')
+    def init_model():
+        try:
+            m = HallOfResidence(n_stu=50,
+                                n_amb=1,
+                                straight_bias=2.0,
+                                home_road='Oxford Road',
+                                seed=None)
 
-print('Model has finished running.')
+            model.value = m
+            init_error.value = None
+        except Exception as exc:
+            init_error.value = f"{type(exc).__name__}: {exc}"
+            print("Model initialization failed:")
+            print(traceback.format_exc())
 
-page = SolaraViz(model=model,
-                 components=[NetworkPlot, make_plot_component('Mean Sentiment')],
-                 model_params=model_params,
-                 name='Uni of Manchester ABM'
-)
+    solara.use_effect(init_model, dependencies=[])
+
+    if init_error.value is not None:
+        return solara.Markdown(f"Initialization failed: `{init_error.value}`")
+
+    if model.value is None:
+        return solara.HTML("Initializing model...")
+
+    solara.Style(".v-navigation-drawer { min-width: 450px !important; width: 450px !important; }")
+    return SolaraViz(model=model.value,
+                     components=[NetworkPlot, 
+                                 make_plot_component('Mean Sentiment')],
+                     model_params=model_params,
+                        name='Uni of Manchester ABM')
+
+page = Page

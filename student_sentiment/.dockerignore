@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+.venv/
+venv/
+.env
+*.ipynb
+hall_of_residence.py
+hall_of_residence_outputs.md
