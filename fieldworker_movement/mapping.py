@@ -4,6 +4,7 @@ depiction for the field staff agent based model.
 
 Aaron Stace, 03/07/2026
 """
+import json
 import geopandas as gpd
 import pandas as pd
 import networkx as nx
@@ -11,6 +12,8 @@ from shapely import STRtree, Point
 import neatnet
 
 from pyproj import Transformer
+from config import NETWORK_CACHE_FILEPATH, ADDRESSES_DELIMITER, EASTING_COLUMN, \
+    NORTHING_COLUMN, LSOA_CODE_COLUMN
 
 
 # Reusable transformer: British National Grid → WGS84 (required by tile maps).
@@ -19,13 +22,27 @@ TRANSFORMER_27700_TO_4326 = Transformer.from_crs("EPSG:27700", "EPSG:4326",
                                                  always_xy=True)
 
 
-def load_network_data(roads_file, paths_file):
+def load_network_data(roads_file, paths_file, cache_file=None):
     """
     Load the Newcastle road and path geopackage files, tag each with a 'type'
     edge attribute ('road' or 'path'), and return them as a single combined
     GeoDataFrame.
+
+    The cache is written automatically after the first successful run. Delete 
+    the cache file to force a rebuild (e.g. after updating the source shapefiles).
     """
+    import os
     import time
+
+    if cache_file is None:
+        cache_file = NETWORK_CACHE_FILEPATH
+
+    if os.path.exists(cache_file):
+        print(f"  Loading network from cache: {cache_file}")
+        t0 = time.time()
+        gdf = gpd.read_file(cache_file)
+        print(f"  Cache loaded ({time.time() - t0:.1f}s)")
+        return gdf
 
     t0 = time.time()
     gdf_roads = gpd.read_file(roads_file)
@@ -53,6 +70,9 @@ def load_network_data(roads_file, paths_file):
     t2 = time.time()
     gdf = neatnet.close_gaps(gdf, tolerance=1.0)
     print(f"  close_gaps done ({time.time() - t2:.1f}s)")
+
+    print(f"  Saving network cache to: {cache_file}")
+    gdf.to_file(cache_file, driver="GPKG")
 
     return gdf
 
@@ -167,10 +187,14 @@ def load_addresses(address_csv_path):
     gdf : GeoDataFrame
         A GeoDataFrame containing the address data with a geometry column.
     """
-    df = pd.read_csv(address_csv_path)
+    df = pd.read_csv(address_csv_path, sep=ADDRESSES_DELIMITER,
+                     low_memory=False)
+    # If pandas starts having dtype problems, add dtype={LSOA_CODE_COLUMN: str}
+    # (for example) for the columns as kwargs.
+
     gdf = gpd.GeoDataFrame(
         df,
-        geometry=gpd.points_from_xy(df['ai_easting'], df['ai_northing']),
+        geometry=gpd.points_from_xy(df[EASTING_COLUMN], df[NORTHING_COLUMN]),
         crs="EPSG:27700"
     )
     return gdf
@@ -179,25 +203,31 @@ def load_addresses(address_csv_path):
 def snap_addresses_to_nodes(gdf_addresses, G):
     """
     For each address in gdf_addresses, find the nearest node in the graph G
-    and return a list of those nodes (as coordinate tuples), one per address.
+    and return a list of (node, lsoa_code) pairs, one per address.
 
     Parameters
     ----------
     gdf_addresses : GeoDataFrame
-        Address points loaded by load_addresses().
+        Address points loaded by load_addresses(). Must contain a
+        'gi_lsoa_code' column.
     G : nx.Graph
         The road/path graph whose nodes are (x, y) coordinate tuples.
 
     Returns
     -------
-    list of tuples
-        One graph node per address, in the same order as gdf_addresses.
+    list of (tuple, str)
+        Each element is (graph_node, lsoa_code) in the same order as
+        gdf_addresses.
     """
     node_list = list(G.nodes())
     node_points = [Point(n) for n in node_list]
     tree = STRtree(node_points)
 
-    return [node_list[tree.nearest(geom)] for geom in gdf_addresses.geometry]
+    return [
+        (node_list[tree.nearest(geom)], lsoa)
+        for geom, lsoa in zip(gdf_addresses.geometry,
+                               gdf_addresses[LSOA_CODE_COLUMN])
+    ]
 
 
 def to_wgs84(eastings, northings):
@@ -217,3 +247,42 @@ def to_wgs84(eastings, northings):
     # future home: utils.py
     lons, lats = TRANSFORMER_27700_TO_4326.transform(list(eastings), list(northings))
     return lons, lats
+
+
+def load_lsoa_geojson(lsoa_filepath, lsoa_code_column):
+    """
+    Load an LSOA polygon shapefile/geopackage, reproject to WGS84, and return
+    a GeoJSON FeatureCollection dict and an ordered list of LSOA codes.
+
+    The GeoJSON features have their 'id' field set to the LSOA code so that
+    Plotly's Choroplethmapbox can match them against the 'locations' array.
+
+    Parameters
+    ----------
+    lsoa_filepath : str
+        Path to the LSOA polygon file (.gpkg, .shp, etc.).
+    lsoa_code_column : str
+        Name of the column in the file that holds the LSOA code
+        ('LSOA21CD').
+
+    Returns
+    -------
+    geojson : dict
+        GeoJSON FeatureCollection compatible with go.Choroplethmapbox.
+    lsoa_ids : list of str
+        LSOA codes in the same order as the features.
+    """
+    gdf = gpd.read_file(lsoa_filepath)
+    gdf = gdf.to_crs("EPSG:4326")
+    gdf = gdf[[lsoa_code_column, 'geometry']].copy()
+    gdf = gdf.rename(columns={lsoa_code_column: 'lsoa_code'})
+
+    geojson = json.loads(gdf.to_json())
+
+    # Choroplethmapbox requires feature['id'] at the top level (not just inside
+    # properties) to match against the 'locations' array.
+    for feature in geojson['features']:
+        feature['id'] = feature['properties']['lsoa_code']
+
+    lsoa_ids = [f['id'] for f in geojson['features']]
+    return geojson, lsoa_ids

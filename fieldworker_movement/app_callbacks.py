@@ -4,9 +4,11 @@ Dash callbacks for the Fieldworker ABM visualisation.
 import dash
 from dash import Input, Output, State, Patch, no_update
 
+from config import num_field_staff
+
 from fieldwork_model import FieldWorkModel
 from agents import Household
-from fieldworker_movement.app_layout import build_initial_figure
+from app_layout import build_initial_figure
 
 
 def init_callbacks(app, state):
@@ -14,9 +16,9 @@ def init_callbacks(app, state):
     Register all Dash callbacks.
 
     `state` is a dict with keys:
-      'model'      – the live FieldWorkModel instance
-      'centre_lon' – float
-      'centre_lat' – float
+      'model'      - the live FieldWorkModel instance
+      'centre_lon' - float
+      'centre_lat' - float
 
     Callbacks mutate `state` in place so that all functions share the same
     model instance even after a reset.
@@ -39,7 +41,7 @@ def init_callbacks(app, state):
         elif triggered == 'pause-btn':
             store['running'] = False
         elif triggered == 'reset-btn':
-            state['model'] = FieldWorkModel()
+            state['model'] = FieldWorkModel(num_field_staff)
             state['centre_lon'] = sum(state['model'].address_lons) / len(state['model'].address_lons)
             state['centre_lat'] = sum(state['model'].address_lats) / len(state['model'].address_lats)
             store['running'] = False
@@ -139,8 +141,8 @@ def init_callbacks(app, state):
         )
 
     @app.callback(
-        Output('response-chance-slider', 'value'),  # echo back to confirm
-        Input('response-chance-slider', 'value'),
+        Output('hh-response-chance-slider', 'value'),  # echo back to confirm
+        Input('hh-response-chance-slider', 'value'),
         prevent_initial_call=True,
     )
     def update_response_chance(value):

@@ -1,5 +1,8 @@
 """
-Dash layout and figure builder for the Fieldworker ABM visualisation.
+Dash layout and figure builder for the Fieldworker ABM visualisation. Controls
+the web page visualisation of the model.
+
+Aaron Stace, 06/07/2026
 """
 import plotly.graph_objects as go
 from dash import dcc, html
@@ -93,28 +96,41 @@ def create_layout(initial_fig):
                 style={'display': 'inline-block', 'marginLeft': '6px'},
             ),
 
-            html.Span('steps', style={'marginLeft': '4px'}),
             # Choropleth update frequency slider
             html.Span('  |  Update choropleth every',
                       style={'marginLeft': '24px'}),
-            dcc.Slider(
-                id='choropleth-interval-slider',
-                min=1, max=50, step=1, value=1,
-                marks={1: '1', 10: '10', 25: '25', 50: '50'},
-                tooltip={'placement': 'bottom', 'always_visible': False},
-                style={'display': 'inline-block', 'width': '180px',
-                       'verticalAlign': 'middle', 'marginLeft': '6px'},
+            html.Div(
+                dcc.Slider(
+                    id='choropleth-interval-slider',
+                    min=1, max=50, step=1, value=1,
+                    marks={1: '1', 10: '10', 25: '25', 50: '50'},
+                    tooltip={'placement': 'bottom', 'always_visible': False},
+                ),
+                style={
+                    'display': 'inline-block',
+                    'width': '180px',
+                    'verticalAlign': 'middle',
+                    'marginLeft': '6px',
+                },
             ),
+            html.Span('steps', style={'marginLeft': '4px'}),
+            
             # Slider updating household response chance
             html.Span('  |  Household response chance: ',
                       style={'marginLeft': '24px'}),
-            dcc.Slider(
-                id='hh-response-chance-slider',
-                min=0.0, max=1.0, step=0.05, value=0.5,
-                marks={0: '0', 0.5: '0.5', 1: '1'},
-                tooltip={'placement': 'bottom', 'always_visible': False},
-                style={'display': 'inline-block', 'width': '180px',
-                       'verticalAlign': 'middle', 'marginLeft': '6px'},
+            html.Div(
+                dcc.Slider(
+                    id='hh-response-chance-slider',
+                    min=0.0, max=1.0, step=0.05, value=0.5,
+                    marks={0: '0', 0.5: '0.5', 1: '1'},
+                    tooltip={'placement': 'bottom', 'always_visible': False},
+                ),
+                style={
+                    'display': 'inline-block',
+                    'width': '180px',
+                    'verticalAlign': 'middle',
+                    'marginLeft': '6px',
+                },
             ),
 
         ], style={'padding': '8px', 'background': '#f0f0f0',
