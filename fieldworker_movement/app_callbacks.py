@@ -102,7 +102,7 @@ def init_callbacks(app, state):
             patched_fig['data'][2]['z'] = [
                 model.lsoa_stats[lsoa][metric] for lsoa in model.lsoa_ids
             ]
-            patched_fig['data'][2]['name'] = metric.capitalize() + ' per LSOA'
+            patched_fig['data'][2]['name'] = metric.capitalize()
 
         return patched_fig, f'Step: {store["step"]}', store
 
@@ -126,7 +126,7 @@ def init_callbacks(app, state):
         patched_fig['data'][2]['z'] = [
             model.lsoa_stats[lsoa][metric] for lsoa in model.lsoa_ids
         ]
-        patched_fig['data'][2]['name'] = metric.capitalize() + ' per LSOA'
+        patched_fig['data'][2]['name'] = metric.capitalize()
         return patched_fig
 
     @app.callback(

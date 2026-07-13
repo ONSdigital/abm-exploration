@@ -48,7 +48,7 @@ def build_initial_figure(model, centre_lon, centre_lat):
         zmax=50,
         marker_opacity=0.4,
         marker_line_width=0.5,
-        name='Knocks per LSOA',
+        name='Knocks',
         showscale=True,
     ))
 

@@ -20,10 +20,15 @@ class FieldWorker(mesa.Agent):
 
     def move(self):
         """
-        Placeholder for movement logic.
+        Move to the nearest household node (by Euclidean distance), always
+        leaving the current node regardless of knock/interaction outcome.
         """
-        # Field worker should move to the next unoccupied house - check copilot
-        # for advice on how to do this. 
+        household_nodes = [h.node for h in self.model.households if h.node != self.node]
+        if not household_nodes:
+            return
+        nearest = min(household_nodes, key=lambda n: (n[0] - self.node[0])**2 + (n[1] - self.node[1])**2)
+        self.model.grid.move_agent(self, nearest)
+        self.node = nearest
 
     def knock(self, household):
         """
