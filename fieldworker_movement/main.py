@@ -12,7 +12,7 @@ from app_layout import build_initial_figure, create_layout
 from app_callbacks import init_callbacks
 
 
-model = FieldWorkModel(num_field_staff=10)   # update constructor args once they are finalised
+model = FieldWorkModel(num_field_staff=10)  
 
 # Pre-compute the centroid of the address cloud to centre the map on load.
 centre_lon = sum(model.address_lons) / len(model.address_lons)

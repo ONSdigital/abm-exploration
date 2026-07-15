@@ -4,11 +4,19 @@ Dash callbacks for the Fieldworker ABM visualisation.
 import dash
 from dash import Input, Output, State, Patch, no_update
 
-from config import num_field_staff
+from config import num_field_staff, METRIC_METADATA
 
 from fieldwork_model import FieldWorkModel
 from agents import Household
 from app_layout import build_initial_figure
+
+
+def _pct(model, lsoa, metric):
+    """Return metric count as % of total households for an LSOA (0 if no households)."""
+    total = model.lsoa_stats[lsoa]['total_households']
+    if total == 0:
+        return 0
+    return model.lsoa_stats[lsoa][metric] / total * 100
 
 
 def init_callbacks(app, state):
@@ -93,16 +101,20 @@ def init_callbacks(app, state):
         staff_lons, staff_lats = model.get_field_staff_positions()
 
         patched_fig = Patch()
-        patched_fig['data'][1]['lon'] = staff_lons
-        patched_fig['data'][1]['lat'] = staff_lats
+        patched_fig['data'][2]['lon'] = staff_lons
+        patched_fig['data'][2]['lat'] = staff_lats
 
         interval = choropleth_interval or 1
         metric = metric or 'knocks'
         if store['step'] % interval == 0:
-            patched_fig['data'][2]['z'] = [
-                model.lsoa_stats[lsoa][metric] for lsoa in model.lsoa_ids
+            meta = METRIC_METADATA.get(metric, METRIC_METADATA['knocks'])
+            patched_fig['data'][3]['z'] = [
+                _pct(model, lsoa, metric) for lsoa in model.lsoa_ids
             ]
-            patched_fig['data'][2]['name'] = metric.capitalize()
+            patched_fig['data'][3]['name'] = meta['label']
+            patched_fig['data'][3]['colorscale'] = meta['colorscale']
+            patched_fig['data'][3]['zmin'] = 0
+            patched_fig['data'][3]['zmax'] = 100
 
         return patched_fig, f'Step: {store["step"]}', store
 
@@ -122,11 +134,15 @@ def init_callbacks(app, state):
 
         metric = metric or 'knocks'
         model = state['model']
+        meta = METRIC_METADATA.get(metric, METRIC_METADATA['knocks'])
         patched_fig = Patch()
-        patched_fig['data'][2]['z'] = [
-            model.lsoa_stats[lsoa][metric] for lsoa in model.lsoa_ids
+        patched_fig['data'][3]['z'] = [
+            _pct(model, lsoa, metric) for lsoa in model.lsoa_ids
         ]
-        patched_fig['data'][2]['name'] = metric.capitalize()
+        patched_fig['data'][3]['name'] = meta['label']
+        patched_fig['data'][3]['colorscale'] = meta['colorscale']
+        patched_fig['data'][3]['zmin'] = 0
+        patched_fig['data'][3]['zmax'] = 100
         return patched_fig
 
     @app.callback(
@@ -139,14 +155,3 @@ def init_callbacks(app, state):
         return build_initial_figure(
             state['model'], state['centre_lon'], state['centre_lat']
         )
-
-    @app.callback(
-        Output('hh-response-chance-slider', 'value'),  # echo back to confirm
-        Input('hh-response-chance-slider', 'value'),
-        prevent_initial_call=True,
-    )
-    def update_response_chance(value):
-        for agent in state['model'].agents:
-            if isinstance(agent, Household):
-                agent.response_chance = value
-        return value

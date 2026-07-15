@@ -14,6 +14,7 @@ LSOAS_FILEPATH = "C:\\Users\\stacea\\abm-exploration\\fieldworker_movement\\newc
 # Cached network GeoDataFrame written after the first neatnet.close_gaps run.
 # Delete this file to force a rebuild (e.g. after updating the shapefiles).
 NETWORK_CACHE_FILEPATH = "C:\\Users\\stacea\\abm-exploration\\fieldworker_movement\\network_graphs\\network_cache.gpkg"
+LSOA_COMPLETION_FILEPATH = "C:\\Users\\stacea\\abm-exploration\\fieldworker_movement\\addresses\\lsoa_completion_rates.csv"
 
 
 #--------------------------------ADDRESS FILE--------------------------------#
@@ -21,43 +22,47 @@ NETWORK_CACHE_FILEPATH = "C:\\Users\\stacea\\abm-exploration\\fieldworker_moveme
 # Column name in the LSOA shapefile that holds the LSOA code.
 LSOA_CODE_COLUMN = "LSOA21CD"
 ADDRESSES_DELIMITER = ','
+COMPLETION_DELIMITER = ','
 EASTING_COLUMN = 'X_COORDINATE'
 NORTHING_COLUMN = 'Y_COORDINATE'
+INITIAL_COMPLETION_COLUMN = 'initial_completion_rate'
+ONGOING_COMPLETION_COLUMN = 'ongoing_completion_rate'
+DEFAULT_INITIAL_COMPLETION_RATE = 0.0
+DEFAULT_ONGOING_COMPLETION_RATE = 0.0
+DEFAULT_HOUSEHOLD_RESPONSE_CHANCE = 0.5
+
 
 #-----------------------------MODEL PARAMETERS----------------------------#
 
 num_field_staff = 10  # Default number of field staff agents in the model.
+walking_speed = 1.4  # Average walking speed of agents in m/s
+driving_speed = 13.9  # Average driving speed of agents in m/s
 
-model_params = {
-    'n_field_staff': {
-        'type': 'SliderInt',
-        'value': 5,
-        'label': 'No. of field staff',
-        'min': 1,
-        'max': 20,
-        'step': 1,
+
+#---------------------------CHOROPLETH METRICS---------------------------#
+
+# Maps each choropleth metric key to its display label and Plotly colorscale.
+METRIC_METADATA = {
+    'knocks': {
+        'label': 'Knocks',
+        'colorscale': [
+            [0.0, 'rgba(8, 81, 156, 0.0)'],
+            [1.0, 'rgba(8, 81, 156, 1.0)'],
+        ],
     },
-    'walking_speed': {
-        'type': 'SliderInt',
-        'value': 5,
-        'label': 'Walking speed (m/s)',
-        'min': 1,
-        'max': 10,
-        'step': 1,
+    'interactions': {
+        'label': 'Interactions',
+        'colorscale': [
+            [0.0, 'rgba(35, 139, 69, 0.0)'],
+            [1.0, 'rgba(35, 139, 69, 1.0)'],
+        ],
     },
-    'answer_prob': {
-        'type': 'SliderInt',
-        'value': 0.5,
-        'label': 'P(household responds to knock)',
-        'min': 0,
-        'max': 1,
-    },
-    'hh_response_chance': {
-        'type': 'SliderInt',
-        'value': 0.75,
-        'label': 'Chance of household completing Census',
-        'min': 0,
-        'max': 1,
-        'step': 0.05,
+    'questionnaire_completions': {
+        'label': 'Questionnaire Completion',
+        'colorscale': [
+            [0.0, 'rgb(215, 48, 39)'],
+            [0.5, 'rgb(255, 255, 191)'],
+            [1.0, 'rgb(26, 150, 65)'],
+        ],
     },
 }

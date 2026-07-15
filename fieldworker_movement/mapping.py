@@ -12,8 +12,10 @@ from shapely import STRtree, Point
 import neatnet
 
 from pyproj import Transformer
-from config import NETWORK_CACHE_FILEPATH, ADDRESSES_DELIMITER, EASTING_COLUMN, \
-    NORTHING_COLUMN, LSOA_CODE_COLUMN
+from config import NETWORK_CACHE_FILEPATH, ADDRESSES_DELIMITER, \
+    COMPLETION_DELIMITER, EASTING_COLUMN, NORTHING_COLUMN, LSOA_CODE_COLUMN, \
+    INITIAL_COMPLETION_COLUMN, ONGOING_COMPLETION_COLUMN, \
+    DEFAULT_INITIAL_COMPLETION_RATE, DEFAULT_ONGOING_COMPLETION_RATE
 
 
 # Reusable transformer: British National Grid → WGS84 (required by tile maps).
@@ -22,7 +24,7 @@ TRANSFORMER_27700_TO_4326 = Transformer.from_crs("EPSG:27700", "EPSG:4326",
                                                  always_xy=True)
 
 
-def load_network_data(roads_file, paths_file, cache_file=None):
+def load_network_data(roads_file, paths_file, tolerance=1.0, cache_file=None):
     """
     Load the Newcastle road and path geopackage files, tag each with a 'type'
     edge attribute ('road' or 'path'), and return them as a single combined
@@ -68,7 +70,7 @@ def load_network_data(roads_file, paths_file, cache_file=None):
     # every nearby geometry. For a city-scale network this can take 1-5 minutes.
     print("  Running neatnet.close_gaps (this is the slow step — please wait)...")
     t2 = time.time()
-    gdf = neatnet.close_gaps(gdf, tolerance=1.0)
+    gdf = neatnet.close_gaps(gdf, tolerance=tolerance)
     print(f"  close_gaps done ({time.time() - t2:.1f}s)")
 
     print(f"  Saving network cache to: {cache_file}")
@@ -94,20 +96,15 @@ def build_graph_from_shapefile(gdf):
     """
     G = nx.Graph()
 
-    edge_list = []
     for row in gdf.itertuples(index=False):
         coords = list(row.geometry.coords)
         edge_len = row.geometry.length
         edge_type = row.type
-        edge_list.extend(
+        G.add_edges_from(
             (start, end, {'length': edge_len, 'type': edge_type})
             for start, end in zip(coords[:-1], coords[1:])
         )
-
-    G.add_edges_from(edge_list)
     nx.set_node_attributes(G, {node: node for node in G.nodes}, 'pos')
-
-    G = G.subgraph(max(nx.connected_components(G), key=len)).copy()
 
     print(f"Nodes: {G.number_of_nodes()}, Edges: {G.number_of_edges()}")
     print(f"Connected components: {nx.number_connected_components(G)}")
@@ -156,15 +153,14 @@ def connect_components(G, tolerance=5.0):
             continue
         for node in component:
             pt = Point(node)
-            # nearest_points returns (geometry_in_tree, query_point) in older
-            # Shapely; STRtree.nearest returns the index of the nearest geometry.
             nearest_idx = tree.nearest(pt)
             nearest_node = main_nodes[nearest_idx]
             dist = pt.distance(Point(nearest_node))
+            
             if dist <= tolerance:
                 G.add_edge(node, nearest_node,
-                           length=dist,
-                           type='connector')
+                            length=dist,
+                            type='connector')
                 connectors_added += 1
 
     print(f"connect_components: added {connectors_added} connector edge(s). "
@@ -198,6 +194,64 @@ def load_addresses(address_csv_path):
         crs="EPSG:27700"
     )
     return gdf
+
+
+def load_lsoa_completion_rates(completion_csv_path):
+    """
+    Load flat per-LSOA electronic survey completion rates from CSV.
+
+    The CSV must contain the LSOA code plus separate columns for the initial
+    pre-fieldwork completion share and the ongoing per-step completion chance.
+    """
+    df = pd.read_csv(completion_csv_path, sep=COMPLETION_DELIMITER,
+                     low_memory=False)
+
+    required_columns = {
+        LSOA_CODE_COLUMN,
+        INITIAL_COMPLETION_COLUMN,
+        ONGOING_COMPLETION_COLUMN,
+    }
+    missing_columns = required_columns.difference(df.columns)
+    if missing_columns:
+        missing = ', '.join(sorted(missing_columns))
+        raise ValueError(
+            f"Missing required completion-rate column(s): {missing}"
+        )
+
+    duplicate_mask = df[LSOA_CODE_COLUMN].astype(str).duplicated(keep=False)
+    if duplicate_mask.any():
+        duplicates = sorted(df.loc[duplicate_mask, LSOA_CODE_COLUMN].astype(str).unique())
+        raise ValueError(
+            "Duplicate LSOA completion-rate rows found for: "
+            + ', '.join(duplicates)
+        )
+
+    rates = {}
+    for row in df.itertuples(index=False):
+        lsoa_code = str(getattr(row, LSOA_CODE_COLUMN)).strip()
+        initial_rate = getattr(row, INITIAL_COMPLETION_COLUMN)
+        ongoing_rate = getattr(row, ONGOING_COMPLETION_COLUMN)
+
+        initial_rate = DEFAULT_INITIAL_COMPLETION_RATE if \
+                                pd.isna(initial_rate) else float(initial_rate)
+        ongoing_rate = DEFAULT_ONGOING_COMPLETION_RATE if \
+                                pd.isna(ongoing_rate) else float(ongoing_rate)
+
+        for rate_name, rate_value in (
+            (INITIAL_COMPLETION_COLUMN, initial_rate),
+            (ONGOING_COMPLETION_COLUMN, ongoing_rate),
+        ):
+            if not 0.0 <= rate_value <= 1.0:
+                raise ValueError(
+                    f"{rate_name} for {lsoa_code} must be between 0 and 1."
+                )
+
+        rates[lsoa_code] = {
+            INITIAL_COMPLETION_COLUMN: initial_rate,
+            ONGOING_COMPLETION_COLUMN: ongoing_rate,
+        }
+
+    return rates
 
 
 def snap_addresses_to_nodes(gdf_addresses, G):
@@ -252,7 +306,7 @@ def to_wgs84(eastings, northings):
 def load_lsoa_geojson(lsoa_filepath, lsoa_code_column):
     """
     Load an LSOA polygon shapefile/geopackage, reproject to WGS84, and return
-    a GeoJSON FeatureCollection dict and an ordered list of LSOA codes.
+    a GeoJSON FeatureCollection dict, ordered LSOA codes, and ordered names.
 
     The GeoJSON features have their 'id' field set to the LSOA code so that
     Plotly's Choroplethmapbox can match them against the 'locations' array.
@@ -271,10 +325,15 @@ def load_lsoa_geojson(lsoa_filepath, lsoa_code_column):
         GeoJSON FeatureCollection compatible with go.Choroplethmapbox.
     lsoa_ids : list of str
         LSOA codes in the same order as the features.
+    lsoa_names : list of str
+        LSOA labels for hover display (from the LSOA code column).
     """
     gdf = gpd.read_file(lsoa_filepath)
     gdf = gdf.to_crs("EPSG:4326")
+
     gdf = gdf[[lsoa_code_column, 'geometry']].copy()
+    gdf['lsoa_name'] = gdf[lsoa_code_column].astype(str)
+
     gdf = gdf.rename(columns={lsoa_code_column: 'lsoa_code'})
 
     geojson = json.loads(gdf.to_json())
@@ -285,4 +344,5 @@ def load_lsoa_geojson(lsoa_filepath, lsoa_code_column):
         feature['id'] = feature['properties']['lsoa_code']
 
     lsoa_ids = [f['id'] for f in geojson['features']]
-    return geojson, lsoa_ids
+    lsoa_names = [f['properties']['lsoa_name'] for f in geojson['features']]
+    return geojson, lsoa_ids, lsoa_names

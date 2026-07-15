@@ -7,6 +7,24 @@ Aaron Stace, 06/07/2026
 import plotly.graph_objects as go
 from dash import dcc, html
 
+from config import METRIC_METADATA
+from mapping import to_wgs84
+
+
+def edge_trace_data(graph, edge_type=None):
+    lons = []
+    lats = []
+
+    for start, end, data in graph.edges(data=True):
+        if edge_type is not None and data.get('type') != edge_type:
+            continue
+        start_lon, start_lat = to_wgs84([start[0]], [start[1]])
+        end_lon, end_lat = to_wgs84([end[0]], [end[1]])
+        lons.extend([start_lon[0], end_lon[0], None])
+        lats.extend([start_lat[0], end_lat[0], None])
+
+    return lons, lats
+
 
 def build_initial_figure(model, centre_lon, centre_lat):
     """
@@ -18,6 +36,16 @@ def build_initial_figure(model, centre_lon, centre_lat):
     staff_lons, staff_lats = model.get_field_staff_positions()
 
     fig = go.Figure()
+
+    network_lons, network_lats = edge_trace_data(model.graph)
+    fig.add_trace(go.Scattermapbox(
+        lon=network_lons,
+        lat=network_lats,
+        mode='lines',
+        line=dict(width=1, color='blue'),
+        name='Road/path network',
+        hoverinfo='skip',
+    ))
 
     # Trace 0 — address dots (static background layer)
     fig.add_trace(go.Scattermapbox(
@@ -39,17 +67,20 @@ def build_initial_figure(model, centre_lon, centre_lat):
     ))
 
     # Trace 2 — LSOA choropleth (updated via Patch every N steps)
+    _initial_meta = METRIC_METADATA['knocks']
     fig.add_trace(go.Choroplethmapbox(
         geojson=model.lsoa_geojson,
         locations=model.lsoa_ids,
+        customdata=model.lsoa_names,
         z=[0] * len(model.lsoa_ids),
-        colorscale='Blues',
+        colorscale=_initial_meta['colorscale'],
         zmin=0,
-        zmax=50,
-        marker_opacity=0.4,
+        zmax=100,
+        marker_opacity=0.55,
         marker_line_width=0.5,
-        name='Knocks',
+        name=_initial_meta['label'],
         showscale=True,
+        hovertemplate='%{customdata}<br>%{z:.0f}%<extra></extra>',
     ))
 
     fig.update_layout(
@@ -90,6 +121,8 @@ def create_layout(initial_fig):
                 options=[
                     {'label': 'Knocks',        'value': 'knocks'},
                     {'label': 'Interactions',  'value': 'interactions'},
+                    {'label': 'Questionnaire Completion',
+                     'value': 'questionnaire_completions'},
                 ],
                 value='knocks',
                 inline=True,
@@ -114,24 +147,6 @@ def create_layout(initial_fig):
                 },
             ),
             html.Span('steps', style={'marginLeft': '4px'}),
-            
-            # Slider updating household response chance
-            html.Span('  |  Household response chance: ',
-                      style={'marginLeft': '24px'}),
-            html.Div(
-                dcc.Slider(
-                    id='hh-response-chance-slider',
-                    min=0.0, max=1.0, step=0.05, value=0.5,
-                    marks={0: '0', 0.5: '0.5', 1: '1'},
-                    tooltip={'placement': 'bottom', 'always_visible': False},
-                ),
-                style={
-                    'display': 'inline-block',
-                    'width': '180px',
-                    'verticalAlign': 'middle',
-                    'marginLeft': '6px',
-                },
-            ),
 
         ], style={'padding': '8px', 'background': '#f0f0f0',
                   'display': 'flex', 'alignItems': 'center', 'flexWrap': 'wrap'}),
