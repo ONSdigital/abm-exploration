@@ -7,7 +7,7 @@ Aaron Stace, 06/07/2026
 import plotly.graph_objects as go
 from dash import dcc, html
 
-from config import METRIC_METADATA
+from config import METRIC_METADATA, dash_interval_ms
 from mapping import to_wgs84
 
 
@@ -111,7 +111,7 @@ def create_layout(initial_fig):
             html.Button('⏸ Pause', id='pause-btn', n_clicks=0,
                         style={'marginRight': '8px'}),
             html.Button('↺ Reset', id='reset-btn', n_clicks=0),
-            html.Span('Step: 0', id='step-counter',
+            html.Span('Step: 0 | Day 1 | 09:00:00', id='step-counter',
                       style={'marginLeft': '16px', 'fontFamily': 'monospace'}),
 
             # Metric toggle — which stat the choropleth colours by
@@ -130,7 +130,7 @@ def create_layout(initial_fig):
             ),
 
             # Choropleth update frequency slider
-            html.Span('  |  Update choropleth every',
+            html.Span(' |  Update choropleth every',
                       style={'marginLeft': '24px'}),
             html.Div(
                 dcc.Slider(
@@ -146,6 +146,25 @@ def create_layout(initial_fig):
                     'marginLeft': '6px',
                 },
             ),
+
+            # Number of seconds per simulation step slider
+            html.Span(' | Seconds per step', 
+                      style={'marginLeft': '6px'}),
+            html.Div(
+                dcc.Slider(
+                    id='step-duration-slider',
+                    min=1, max=900, step=60, value=60,
+                    marks={1: '1', 300: '300', 600: '600', 900: '900'},
+                    tooltip={'placement': 'bottom', 'always_visible': False},
+                ),
+                style={
+                    'display': 'inline-block',
+                    'width': '180px',
+                    'verticalAlign': 'middle',
+                    'marginLeft': '6px',
+                },
+            ),
+
             html.Span('steps', style={'marginLeft': '4px'}),
 
         ], style={'padding': '8px', 'background': '#f0f0f0',
@@ -160,7 +179,7 @@ def create_layout(initial_fig):
         ),
 
         # Interval ticker (fires every 500 ms when running)
-        dcc.Interval(id='interval', interval=500, disabled=True),
+        dcc.Interval(id='interval', interval=dash_interval_ms, disabled=True),
 
         # Store: {'running': bool, 'step': int}
         dcc.Store(id='run-store', data={'running': False, 'step': 0}),

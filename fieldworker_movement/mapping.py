@@ -31,7 +31,25 @@ def load_network_data(roads_file, paths_file, tolerance=1.0, cache_file=None):
     GeoDataFrame.
 
     The cache is written automatically after the first successful run. Delete 
-    the cache file to force a rebuild (e.g. after updating the source shapefiles).
+    the cache file to force a rebuild (e.g. after updating the source 
+    shapefiles).
+
+    Parameters
+    ----------
+    roads_file : str
+        Path to the roads geopackage file.
+    paths_file : str
+        Path to the paths geopackage file.
+    tolerance : float
+        Maximum distance (in CRS units) to snap near-miss endpoints together.
+    cache_file : str, optional
+        Path to the cache file for storing the combined network. If None, the default
+        NETWORK_CACHE_FILEPATH is used.
+
+    Returns
+    -------
+    gdf : GeoDataFrame
+        A GeoDataFrame containing the combined road and path data with a geometry column.
     """
     import os
     import time
@@ -286,7 +304,7 @@ def snap_addresses_to_nodes(gdf_addresses, G):
 
 def to_wgs84(eastings, northings):
     """
-    Convert arrays of British National Grid (EPSG:27700) coordinates to
+    Converts arrays of British National Grid (EPSG:27700) coordinates to
     WGS84 longitude/latitude (EPSG:4326) for use with tile-based maps.
 
     Parameters
