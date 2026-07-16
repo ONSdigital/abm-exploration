@@ -220,6 +220,28 @@ class FieldWorkModel(mesa.Model):
         northings = [position[1] for position in display_positions]
         return to_wgs84(eastings, northings)
 
+    def set_field_staff_count(self, target_count):
+        """
+        Rebuild the field staff agent set to match a requested count.
+
+        This is intended to be called at controlled synchronization points
+        (for example at the start of a new simulated day).
+        """
+        target_count = max(1, int(target_count))
+
+        for agent in list(self.field_staff):
+            self.grid.remove_agent(agent)
+            agent.remove()
+
+        self.field_staff = FieldWorker.create_agents(
+            model=self,
+            n=target_count,
+            node=[
+                self.random.choice(self.node_list)
+                for _ in range(target_count)
+            ],
+        )
+
     def step(self):
         """
         One step of the model.

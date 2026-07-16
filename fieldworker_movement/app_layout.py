@@ -104,7 +104,7 @@ def build_initial_figure(model, centre_lon, centre_lat):
 
 def create_layout(initial_fig):
     return html.Div([
-        # Controls bar
+        # Controls bar — row 1: buttons, step counter, metric radio
         html.Div([
             html.Button('▶ Play',  id='play-btn',  n_clicks=0,
                         style={'marginRight': '8px'}),
@@ -129,46 +129,75 @@ def create_layout(initial_fig):
                 style={'display': 'inline-block', 'marginLeft': '6px'},
             ),
 
-            # Choropleth update frequency slider
-            html.Span(' |  Update choropleth every',
-                      style={'marginLeft': '24px'}),
-            html.Div(
-                dcc.Slider(
-                    id='choropleth-interval-slider',
-                    min=1, max=50, step=1, value=1,
-                    marks={1: '1', 10: '10', 25: '25', 50: '50'},
-                    tooltip={'placement': 'bottom', 'always_visible': False},
-                ),
-                style={
-                    'display': 'inline-block',
-                    'width': '180px',
-                    'verticalAlign': 'middle',
-                    'marginLeft': '6px',
-                },
-            ),
+            # Settings dropdown — sliders
+            html.Details([
+                html.Summary('⚙ Settings', style={
+                    'cursor': 'pointer',
+                    'marginLeft': '24px',
+                    'fontWeight': 'bold',
+                    'userSelect': 'none',
+                }),
+                html.Div([
+                    # Choropleth update frequency slider
+                    html.Div([
+                        html.Span('Update choropleth every',
+                                  style={'fontWeight': 'bold'}),
+                        dcc.Slider(
+                            id='choropleth-interval-slider',
+                            min=1, max=50, step=1, value=1,
+                            marks={1: '1', 10: '10', 25: '25', 50: '50'},
+                            tooltip={'placement': 'bottom',
+                                     'always_visible': False},
+                        ),
+                        html.Span('steps',
+                                  style={'fontSize': '0.8em',
+                                         'color': '#555'}),
+                    ], style={'width': '220px', 'marginRight': '32px'}),
 
-            # Number of seconds per simulation step slider
-            html.Span(' | Seconds per step', 
-                      style={'marginLeft': '6px'}),
-            html.Div(
-                dcc.Slider(
-                    id='step-duration-slider',
-                    min=1, max=900, step=60, value=60,
-                    marks={1: '1', 300: '300', 600: '600', 900: '900'},
-                    tooltip={'placement': 'bottom', 'always_visible': False},
-                ),
-                style={
-                    'display': 'inline-block',
-                    'width': '180px',
-                    'verticalAlign': 'middle',
-                    'marginLeft': '6px',
-                },
-            ),
+                    # Seconds per simulation step slider
+                    html.Div([
+                        html.Span('Seconds per step',
+                                  style={'fontWeight': 'bold'}),
+                        dcc.Slider(
+                            id='step-duration-slider',
+                            min=1, max=900, step=60, value=60,
+                            marks={1: '1', 300: '300', 600: '600',
+                                   900: '900'},
+                            tooltip={'placement': 'bottom',
+                                     'always_visible': False},
+                        ),
+                    ], style={'width': '220px', 'marginRight': '32px'}),
 
-            html.Span('steps', style={'marginLeft': '4px'}),
+                    # Number of field staff slider
+                    html.Div([
+                        html.Span('Field staff',
+                                  style={'fontWeight': 'bold'}),
+                        dcc.Slider(
+                            id='field-staff-slider',
+                            min=1, max=50, step=1, value=10,
+                            marks={1: '1', 10: '10', 25: '25', 50: '50'},
+                            tooltip={'placement': 'bottom',
+                                     'always_visible': False},
+                        ),
+                        html.Span('(applied at next day boundary)',
+                                  style={'fontSize': '0.8em',
+                                         'color': '#555'}),
+                    ], style={'width': '220px'}),
+
+                ], style={
+                    'display': 'flex',
+                    'flexDirection': 'row',
+                    'alignItems': 'flex-start',
+                    'padding': '12px 16px',
+                    'background': '#e4e4e4',
+                    'borderTop': '1px solid #ccc',
+                    'marginTop': '4px',
+                }),
+            ], style={'marginLeft': '16px'}),
 
         ], style={'padding': '8px', 'background': '#f0f0f0',
-                  'display': 'flex', 'alignItems': 'center', 'flexWrap': 'wrap'}),
+                  'display': 'flex', 'alignItems': 'center',
+                  'flexWrap': 'wrap'}),
 
         # Map
         dcc.Graph(

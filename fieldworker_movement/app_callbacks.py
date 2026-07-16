@@ -43,13 +43,19 @@ def init_callbacks(app, state):
         Input('play-btn',  'n_clicks'),
         Input('pause-btn', 'n_clicks'),
         Input('reset-btn', 'n_clicks'),
+        Input('field-staff-slider', 'value'),
         State('run-store', 'data'),
         State('step-duration-slider', 'value'),
         prevent_initial_call=True,
     )
-    def handle_controls(play_clicks, pause_clicks, reset_clicks, store,
-                        step_duration):
+    def handle_controls(play_clicks, pause_clicks, reset_clicks,
+                        field_staff_value, store, step_duration):
         """Toggle running state or reset the model."""
+        store = store or {}
+        current_staff = len(state['model'].field_staff)
+        store.setdefault('current_field_staff', current_staff)
+        store.setdefault('pending_field_staff', current_staff)
+
         triggered = dash.callback_context.triggered_id
 
         if triggered == 'play-btn':
@@ -57,7 +63,8 @@ def init_callbacks(app, state):
         elif triggered == 'pause-btn':
             store['running'] = False
         elif triggered == 'reset-btn':
-            state['model'] = FieldWorkModel(num_field_staff)
+            selected_staff = int(field_staff_value or num_field_staff)
+            state['model'] = FieldWorkModel(selected_staff)
             if step_duration is not None:
                 state['model'].simulation_step_seconds = step_duration
                 state['model'].travel_distance_per_step = (
@@ -68,6 +75,12 @@ def init_callbacks(app, state):
             state['centre_lat'] = sum(state['model'].address_lats) / len(state['model'].address_lats)
             store['running'] = False
             store['step'] = 0
+            store['current_field_staff'] = selected_staff
+            store['pending_field_staff'] = selected_staff
+        elif triggered == 'field-staff-slider':
+            store['pending_field_staff'] = int(
+                field_staff_value or store['current_field_staff']
+            )
 
         return store
 
@@ -111,12 +124,31 @@ def init_callbacks(app, state):
             return no_update, no_update, no_update
 
         model = state['model']
-        model.simulation_step_seconds = step_duration
-        model.travel_distance_per_step = (
-            model.walking_speed * model.simulation_step_seconds
-        )
+        store.setdefault('current_field_staff', len(model.field_staff))
+        store.setdefault('pending_field_staff', store['current_field_staff'])
+
+        if step_duration is not None:
+            model.simulation_step_seconds = step_duration
+            model.travel_distance_per_step = (
+                model.walking_speed * model.simulation_step_seconds
+            )
+
+        day_before_step = model.current_day
         model.step()
         store['step'] = model.steps
+
+        # Apply queued field staff changes only at the start of a new day.
+        if model.current_day != day_before_step:
+            pending_staff = int(
+                store.get('pending_field_staff', len(model.field_staff))
+            )
+            current_staff = int(
+                store.get('current_field_staff', len(model.field_staff))
+            )
+            if pending_staff != current_staff:
+                model.set_field_staff_count(pending_staff)
+
+        store['current_field_staff'] = len(model.field_staff)
 
         staff_lons, staff_lats = model.get_field_staff_positions()
 
@@ -136,9 +168,20 @@ def init_callbacks(app, state):
             patched_fig['data'][3]['zmin'] = 0
             patched_fig['data'][3]['zmax'] = 100
 
+        current_staff = int(store['current_field_staff'])
+        pending_staff = int(store.get('pending_field_staff', current_staff))
+        if pending_staff != current_staff:
+            staff_suffix = (
+                f' | Staff: {current_staff} '
+                f'(pending {pending_staff} next day)'
+            )
+        else:
+            staff_suffix = f' | Staff: {current_staff}'
+
         return (
             patched_fig,
-            f'Step: {model.steps} | {model.format_simulation_time()}',
+            f'Step: {model.steps} | {model.format_simulation_time()}'
+            f'{staff_suffix}',
             store,
         )
 
