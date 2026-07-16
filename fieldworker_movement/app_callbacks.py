@@ -7,12 +7,18 @@ from dash import Input, Output, State, Patch, no_update
 from config import num_field_staff, METRIC_METADATA
 
 from fieldwork_model import FieldWorkModel
-from agents import Household
 from app_layout import build_initial_figure
 
 
 def _pct(model, lsoa, metric):
-    """Return metric count as % of total households for an LSOA (0 if no households)."""
+    """
+    Calculates stats as a percentage of total households in the LSOA.
+    
+    Returns
+    -------
+    float
+        Percentage of households in the LSOA that have completed the metric.
+    """
     total = model.lsoa_stats[lsoa]['total_households']
     if total == 0:
         return 0
@@ -21,7 +27,7 @@ def _pct(model, lsoa, metric):
 
 def init_callbacks(app, state):
     """
-    Register all Dash callbacks.
+    Registers all Dash callbacks.
 
     `state` is a dict with keys:
       'model'      - the live FieldWorkModel instance
@@ -38,9 +44,11 @@ def init_callbacks(app, state):
         Input('pause-btn', 'n_clicks'),
         Input('reset-btn', 'n_clicks'),
         State('run-store', 'data'),
+        State('step-duration-slider', 'value'),
         prevent_initial_call=True,
     )
-    def handle_controls(play_clicks, pause_clicks, reset_clicks, store):
+    def handle_controls(play_clicks, pause_clicks, reset_clicks, store,
+                        step_duration):
         """Toggle running state or reset the model."""
         triggered = dash.callback_context.triggered_id
 
@@ -50,6 +58,12 @@ def init_callbacks(app, state):
             store['running'] = False
         elif triggered == 'reset-btn':
             state['model'] = FieldWorkModel(num_field_staff)
+            if step_duration is not None:
+                state['model'].simulation_step_seconds = step_duration
+                state['model'].travel_distance_per_step = (
+                    state['model'].walking_speed *
+                    state['model'].simulation_step_seconds
+                )
             state['centre_lon'] = sum(state['model'].address_lons) / len(state['model'].address_lons)
             state['centre_lat'] = sum(state['model'].address_lats) / len(state['model'].address_lats)
             store['running'] = False
@@ -81,9 +95,11 @@ def init_callbacks(app, state):
         State('reset-btn', 'n_clicks'),
         State('metric-store', 'data'),
         State('choropleth-interval-slider', 'value'),
+        State('step-duration-slider', 'value'),
         prevent_initial_call=True,
     )
-    def tick(n_intervals, store, _reset_clicks, metric, choropleth_interval):
+    def tick(n_intervals, store, _reset_clicks, metric, choropleth_interval, 
+             step_duration):
         """
         Advance the simulation by one step and patch:
           - Trace 1 (field staff) every step.
@@ -95,8 +111,12 @@ def init_callbacks(app, state):
             return no_update, no_update, no_update
 
         model = state['model']
+        model.simulation_step_seconds = step_duration
+        model.travel_distance_per_step = (
+            model.walking_speed * model.simulation_step_seconds
+        )
         model.step()
-        store['step'] += 1
+        store['step'] = model.steps
 
         staff_lons, staff_lats = model.get_field_staff_positions()
 
@@ -116,7 +136,11 @@ def init_callbacks(app, state):
             patched_fig['data'][3]['zmin'] = 0
             patched_fig['data'][3]['zmax'] = 100
 
-        return patched_fig, f'Step: {store["step"]}', store
+        return (
+            patched_fig,
+            f'Step: {model.steps} | {model.format_simulation_time()}',
+            store,
+        )
 
     @app.callback(
         Output('map', 'figure', allow_duplicate=True),

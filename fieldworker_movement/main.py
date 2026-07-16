@@ -35,4 +35,3 @@ init_callbacks(app, state)
 
 if __name__ == '__main__':
     app.run(debug=True)
-

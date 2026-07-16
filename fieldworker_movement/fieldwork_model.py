@@ -17,7 +17,10 @@ from config import ROADS_FILEPATH, PATHS_FILEPATH, ADDRESSES_FILEPATH, \
                 LSOA_COMPLETION_FILEPATH, INITIAL_COMPLETION_COLUMN, \
                 ONGOING_COMPLETION_COLUMN, DEFAULT_INITIAL_COMPLETION_RATE, \
                 DEFAULT_ONGOING_COMPLETION_RATE, \
-                DEFAULT_HOUSEHOLD_RESPONSE_CHANCE
+                DEFAULT_HOUSEHOLD_RESPONSE_CHANCE, \
+                walking_speed, \
+                simulation_step_seconds, workday_start_hour, \
+                workday_duration_hours
 
 
 class FieldWorkModel(mesa.Model):
@@ -29,6 +32,19 @@ class FieldWorkModel(mesa.Model):
     def __init__(self, num_field_staff):
         
         super().__init__()
+
+        self.simulation_step_seconds = simulation_step_seconds
+        self.walking_speed = walking_speed
+        self.travel_distance_per_step = (
+            self.walking_speed * self.simulation_step_seconds
+        )
+        self.workday_start_hour = workday_start_hour
+        self.workday_duration_hours = workday_duration_hours
+        self.workday_start_seconds = self.workday_start_hour * 60 * 60
+        self.workday_duration_seconds = self.workday_duration_hours * 60 * 60
+        self.current_day = 1
+        self.seconds_since_midnight = self.workday_start_seconds
+        self.total_work_seconds = 0
 
         gdf = load_network_data(ROADS_FILEPATH, PATHS_FILEPATH)
         G = build_graph_from_shapefile(gdf)
@@ -72,7 +88,7 @@ class FieldWorkModel(mesa.Model):
             self.lsoa_stats[lsoa]['total_households'] += 1
             self.lsoa_stats[lsoa]['remaining_households'] += 1
             if survey_completed:
-                self.register_completion(household, source='initial', step_number=0)
+                self.register_completion(household, characteristic='initial', step_number=0)
 
         # Build a node → [Household, ...] lookup for fast access in visit_household.
         self.node_to_households = defaultdict(list)
@@ -101,37 +117,51 @@ class FieldWorkModel(mesa.Model):
 
     def get_lsoa_completion_rates(self, lsoa_code):
         """
-        Return completion-rate settings for an LSOA with defaults.
+        Returns completion-rate settings for an LSOA with defaults.
         """
         return self.lsoa_completion_rates.get(str(lsoa_code), {
             INITIAL_COMPLETION_COLUMN: DEFAULT_INITIAL_COMPLETION_RATE,
             ONGOING_COMPLETION_COLUMN: DEFAULT_ONGOING_COMPLETION_RATE,
         })
 
-    def register_completion(self, household, source, step_number):
+    def register_completion(self, household, characteristic, step_number):
         """
         Update LSOA completion counters when a household completes a Census
         questionnaire.
+
+        Parameters
+        ----------
+        household : Household agent
+            The household that has completed the Census questionnaire.
+        characteristic : str
+            The characteristic of the completion ('initial' or 'ongoing').
+        step_number : int
+            The simulation step number when the questionnaire was completed.
+
+        Returns
+        -------
+        bool
+            True if the completion was registered, False if it was ignored
         """
-        if source not in {'initial', 'ongoing'}:
-            raise ValueError(f"Unknown completion source: {source}")
+        if characteristic not in {'initial', 'ongoing'}:
+            raise ValueError(f"Unknown completion source: {characteristic}")
 
         if not household.survey_completed:
-            completed_now = household.complete_survey(step_number, source)
+            completed_now = household.complete_survey(step_number, characteristic)
             if not completed_now:
                 return False
-        elif household.completion_source != source and household.completion_step != step_number:
+        elif household.completion_source != characteristic and household.completion_step != step_number:
             return False
 
         stats = self.lsoa_stats[household.lsoa]
         stats['questionnaire_completions'] += 1
-        stats[f'{source}_questionnaire_completions'] += 1
+        stats[f'{characteristic}_questionnaire_completions'] += 1
         stats['remaining_households'] -= 1
         return True
 
     def advance_electronic_completions(self):
         """
-        Allow incomplete households to complete electronically this step.
+        Allows incomplete households to complete electronically this step.
         """
         for household in self.households:
             if household.survey_completed:
@@ -139,9 +169,37 @@ class FieldWorkModel(mesa.Model):
             if self.random.random() < household.ongoing_completion_rate:
                 self.register_completion(
                     household,
-                    source='ongoing',
-                    step_number=self.steps + 1,
+                    characteristic='ongoing',
+                    step_number=self.steps,
                 )
+
+    def format_simulation_time(self):
+        """
+        Return the current simulated day and clock time for display.
+        """
+        hours, remainder = divmod(self.seconds_since_midnight, 60 * 60)
+        minutes, seconds = divmod(remainder, 60)
+        return f'Day {self.current_day} | {hours:02d}:{minutes:02d}:{seconds:02d}'
+
+    def advance_clock(self):
+        """
+        Rolls simulated clock straight to the next day when the field staff 
+        shift ends.
+        """
+        self.seconds_since_midnight += self.simulation_step_seconds
+        self.total_work_seconds += self.simulation_step_seconds
+
+        elapsed_today = self.seconds_since_midnight - self.workday_start_seconds
+        if elapsed_today >= self.workday_duration_seconds:
+            self.current_day += 1
+            self.seconds_since_midnight = self.workday_start_seconds
+
+    def is_working_time(self):
+        """
+        Returns True when the current simulated day is within the active shift.
+        """
+        elapsed_today = self.seconds_since_midnight - self.workday_start_seconds
+        return elapsed_today < self.workday_duration_seconds
 
     def get_field_staff_positions(self):
         """
@@ -154,16 +212,28 @@ class FieldWorkModel(mesa.Model):
         -------
         lons, lats : tuple of lists
         """
-        eastings = [agent.node[0] for agent in self.field_staff]
-        northings = [agent.node[1] for agent in self.field_staff]
+        display_positions = [
+            getattr(agent, 'display_position', agent.node)
+            for agent in self.field_staff
+        ]
+        eastings = [position[0] for position in display_positions]
+        northings = [position[1] for position in display_positions]
         return to_wgs84(eastings, northings)
 
     def step(self):
-        self.advance_electronic_completions()
-        self.field_staff.shuffle_do('step')
+        """
+        One step of the model.
+        """
+        super().step()
+        if self.is_working_time():
+            self.advance_electronic_completions()
+            self.field_staff.shuffle_do('step')
+        self.advance_clock()
         # Snapshot cumulative LSOA stats for this step (shallow copy per LSOA).
         self.step_history.append({
             'step': self.steps,
+            'day': self.current_day,
+            'display_time': self.format_simulation_time(),
             'lsoa_stats': {
                 lsoa: dict(counts)
                 for lsoa, counts in self.lsoa_stats.items()

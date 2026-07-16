@@ -38,6 +38,14 @@ num_field_staff = 10  # Default number of field staff agents in the model.
 walking_speed = 1.4  # Average walking speed of agents in m/s
 driving_speed = 13.9  # Average driving speed of agents in m/s
 
+simulation_step_seconds = 30  # Simulated seconds advanced on each model step.
+workday_start_hour = 9  # Simulated clock time when each workday begins.
+workday_duration_hours = 5  # Fieldwork hours completed before day rollover.
+dash_interval_ms = 500  # Real-time UI refresh cadence for simulation playback.
+
+hh_interaction_mean = 300  # Mean time for hh-staff interaction in seconds (5min).
+hh_interaction_std = 60  # Std of time for hh-staff interaction in seconds (1min).
+
 
 #---------------------------CHOROPLETH METRICS---------------------------#
 

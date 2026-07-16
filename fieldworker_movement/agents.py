@@ -5,6 +5,9 @@ visiting households.
 Aaron Stace, 08/06/2026
 """
 import mesa
+import networkx as nx
+
+from config import hh_interaction_mean, hh_interaction_std
 
 
 class Household(mesa.Agent):
@@ -33,6 +36,19 @@ class Household(mesa.Agent):
     def complete_survey(self, step_number, source):
         """
         Mark the household's electronic survey as completed once only.
+
+        Parameters
+        ----------
+        step_number : int
+            The model step number at which the survey was completed.
+        source : str
+            The source of the survey completion ('initial' or 'ongoing').
+
+        Returns
+        -------
+        bool
+            True if the survey was completed now, False if it was already 
+            completed.
         """
         if self.survey_completed:
             return False
@@ -53,47 +69,258 @@ class FieldWorker(mesa.Agent):
 
         self.node = node
         self.prev_node = None
+        self.display_position = node
+        self.target_node = None
+        self.route_nodes = []
+        self.route_index = 0
+        self.edge_progress = 0.0
+        self.busy_time_remaining_seconds = 0.0
+        self.interaction_mu = hh_interaction_mean
+        self.interaction_std = hh_interaction_std
         model.grid.place_agent(self, node)
+
+    def clear_route(self):
+        """
+        Clears an in-progress route and snaps the display position to the
+        agent's current graph node.
+        """
+        self.target_node = None
+        self.route_nodes = []
+        self.route_index = 0
+        self.edge_progress = 0.0
+        self.display_position = self.node
+
+    def has_incomplete_household_at_node(self, node):
+        """
+        Returns True when the agent's node still has a household that has not 
+        completed the Census questionnaire.
+
+        Parameters
+        ----------
+        node : tuple
+            The (easting, northing) coordinates of the node to check.
+
+        Returns
+        -------
+        bool
+            True if there is at least one incomplete household at the node, 
+            False otherwise.
+        """
+        return any(
+            not household.survey_completed
+            for household in self.model.node_to_households.get(node, [])
+        )
+
+    def has_incomplete_households(self):
+        """
+        Returns True if any household in the model has yet to complete their 
+        Census questionnaire.
+
+        Returns
+        -------
+        bool
+            True if there is at least one such household in the model,
+            False otherwise.
+        """
+        return any(not household.survey_completed for household in \
+                                                        self.model.households)
+
+    def choose_target_node(self):
+        """
+        Choose the next household node to visit using a nearest-node heuristic, 
+        but only among incomplete households.
+
+        Returns
+        -------
+        tuple or None
+            The (easting, northing) coordinates of the chosen target node, or
+            None if all households have completed the Census questionnaire.
+        """
+        if self.has_incomplete_household_at_node(self.node):
+            return self.node
+
+        return min(
+            (
+                household.node for household in self.model.households
+                if not household.survey_completed
+            ),
+            key=lambda node: (node[0] - self.node[0]) ** 2 + 
+                                                (node[1] - self.node[1]) ** 2,
+            default=None,
+        )
+
+    def build_route(self):
+        """
+        Builds the shortest path from the current node to the selected target.
+
+        Returns
+        -------
+        bool
+            True if a route was successfully built, False if no route could be 
+            found or if there is no target node.
+        """
+        target_node = self.choose_target_node()
+        if target_node is None:
+            self.clear_route()
+            return False
+
+        self.target_node = target_node
+        self.route_index = 0
+        self.edge_progress = 0.0
+
+        if target_node == self.node:
+            self.route_nodes = [self.node]
+            self.display_position = self.node
+            return True
+
+        try:
+            self.route_nodes = nx.shortest_path(
+                self.model.graph,
+                self.node,
+                target_node,
+                weight='length',
+            )
+        except (nx.NetworkXNoPath, nx.NodeNotFound):
+            self.clear_route()
+            return False
+
+        self.display_position = self.node
+        return True
+
+    def interpolate_position(self, start_node, end_node, edge_length):
+        """
+        Returns the current display position along an edge using linear
+        interpolation between the two endpoint nodes.
+
+        Parameters
+        ----------
+        start_node : tuple
+            The (easting, northing) coordinates of the edge's start node.
+        end_node : tuple
+            The (easting, northing) coordinates of the edge's end node.
+        edge_length : float
+            The length of the edge in metres.
+
+        Returns
+        -------
+        tuple
+            The (easting, northing) coordinates of the interpolated position.
+        """
+        if edge_length <= 0:
+            return end_node
+
+        progress_ratio = self.edge_progress / edge_length
+        return (
+            start_node[0] + (end_node[0] - start_node[0]) * progress_ratio,
+            start_node[1] + (end_node[1] - start_node[1]) * progress_ratio,
+        )
 
     def move(self):
         """
-        Move to the nearest household node (by Euclidean distance), always
-        leaving the current node regardless of knock/interaction outcome.
+        Movement logic - agent traverses the road network toward the next 
+        target household using a real 'distance budget' per step.
+
+        Returns
+        -------
+        None
         """
-        nearest = min(
-            (
-                h.node for h in self.model.households
-                if h.node != self.node and not h.survey_completed
-            ),
-            key=lambda n: (n[0] - self.node[0])**2 + (n[1] - self.node[1])**2,
-            default=None,
-        )
-        if nearest is None:
+        if self.edge_progress == 0 and \
+                            self.has_incomplete_household_at_node(self.node):
+            self.clear_route()
             return
-        self.model.grid.move_agent(self, nearest)
-        self.node = nearest
+
+        if not self.has_incomplete_households():
+            self.clear_route()
+            return
+
+        if self.edge_progress == 0 and not \
+                    self.has_incomplete_household_at_node(self.target_node):
+            self.clear_route()
+
+        if not self.route_nodes and not self.build_route():
+            return
+
+        if self.target_node == self.node:
+            self.display_position = self.node
+            return
+
+        distance_budget = self.model.travel_distance_per_step
+        while distance_budget > 0 and self.route_index < len(self.route_nodes) - 1:
+            start_node = self.route_nodes[self.route_index]
+            end_node = self.route_nodes[self.route_index + 1]
+            edge_length = self.model.graph[start_node][end_node]['length']
+            remaining_edge_distance = edge_length - self.edge_progress
+
+            if distance_budget < remaining_edge_distance:
+                self.edge_progress += distance_budget
+                self.display_position = self.interpolate_position(
+                    start_node,
+                    end_node,
+                    edge_length,
+                )
+                return
+
+            distance_budget -= remaining_edge_distance
+            self.edge_progress = 0.0
+            self.prev_node = self.node
+            self.model.grid.move_agent(self, end_node)
+            self.node = end_node
+            self.display_position = end_node
+            self.route_index += 1
+
+            if self.target_node == self.node:
+                self.clear_route()
+                return
+
+            if not self.has_incomplete_household_at_node(self.target_node):
+                self.clear_route()
+                return
+
+        self.display_position = self.node
 
     def knock(self, household):
         """
         The field worker knocks on a household's door. Records the knock against
         the household's LSOA and returns True if someone answers.
+
+        Parameters
+        ----------
+        household : Household agent
+            The household being knocked on.
+
+        Returns
+        -------
+        bool
+            True if someone answers the door, False otherwise.
         """
         self.model.lsoa_stats[household.lsoa]['knocks'] += 1
-        # We presumably have some data regarding what proportion of people 
-        # answer the door to field staff?
         # If not in, put in a postcard. Does this prompt a response? Does it 
         # annoy them?
         return self.random.random() < household.response_chance
 
-    def interaction(self, household):
+    def interaction(self, household, mu, std):
         """
         The field worker interacts with a household member. Records the
         interaction against the household's LSOA.
+
+        Parameters
+        ----------
+        household : Household agent
+            The household being interacted with.
+        mu : float
+            The mean time for the interaction in seconds.
+        std : float
+            The standard deviation of the interaction time in seconds.
+
+        Returns
+        -------
+        interaction_length : float
+            The length of the interaction in seconds.
         """
         self.model.lsoa_stats[household.lsoa]['interactions'] += 1
         # Longer could mean higher P of success
         # Change this length of time to be more realistic if data exists.
-        interaction_length = self.random.normalvariate(mu=1/10, sigma=1/60)
+        interaction_length = self.random.normalvariate(mu=mu, sigma=std)
 
         return interaction_length
 
@@ -103,7 +330,8 @@ class FieldWorker(mesa.Agent):
         for a response, then interacting if someone opens the door.
         """
         candidates = [
-            household for household in self.model.node_to_households.get(self.node, [])
+            household for household in self.model.node_to_households.get(
+                                                                self.node, [])
             if not household.survey_completed
         ]
         if not candidates:
@@ -111,9 +339,25 @@ class FieldWorker(mesa.Agent):
         household = self.random.choice(candidates)
         answered = self.knock(household)
         if answered:
-            self.interaction(household)
+            interaction_length = self.interaction(
+                household,
+                self.interaction_mu,
+                self.interaction_std,
+            )
+            self.busy_time_remaining_seconds += max(0.0, interaction_length)
 
     def step(self):
+        """
+        One step for each field staff agent in the simulation. Acknowledges if 
+        an interaction with a household is in progress.
+        """
+        if self.busy_time_remaining_seconds > 0:
+            self.busy_time_remaining_seconds = max(
+                0.0,
+                self.busy_time_remaining_seconds - \
+                    self.model.simulation_step_seconds,
+            )
+            return
 
         self.move()
         self.visit_household()
