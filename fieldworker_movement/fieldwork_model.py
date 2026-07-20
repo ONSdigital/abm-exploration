@@ -45,6 +45,7 @@ class FieldWorkModel(mesa.Model):
         self.current_day = 1
         self.seconds_since_midnight = self.workday_start_seconds
         self.total_work_seconds = 0
+        self.daily_target_lsoas = []
 
         gdf = load_network_data(ROADS_FILEPATH, PATHS_FILEPATH)
         G = build_graph_from_shapefile(gdf)
@@ -114,6 +115,7 @@ class FieldWorkModel(mesa.Model):
             n=num_field_staff,
             node=[self.random.choice(self.node_list) for _ in range(num_field_staff)]
         )
+        self.update_daily_target_lsoas()
 
     def get_lsoa_completion_rates(self, lsoa_code):
         """
@@ -123,6 +125,45 @@ class FieldWorkModel(mesa.Model):
             INITIAL_COMPLETION_COLUMN: DEFAULT_INITIAL_COMPLETION_RATE,
             ONGOING_COMPLETION_COLUMN: DEFAULT_ONGOING_COMPLETION_RATE,
         })
+
+    def update_daily_target_lsoas(self, target_count=None):
+        """
+        Store the current day's lowest-completion incomplete LSOAs. Number 
+        of them is determined by number of field staff available that day.
+
+        Parameters
+        ----------
+        target_count : int or None
+            Maximum number of unique LSOA codes to store. Defaults to the
+            current number of field staff agents.
+
+        Returns
+        -------
+        list[str]
+            The ordered LSOA codes selected for the current day.
+        """
+        if target_count is None:
+            target_count = len(self.field_staff) / 2
+
+        target_count = max(0, int(target_count))
+
+        ranked_lsoas = sorted(
+            (
+                (
+                    counts['questionnaire_completions'] / counts['total_households'],
+                    str(lsoa),
+                )
+                for lsoa, counts in self.lsoa_stats.items()
+                if counts['total_households'] > 0
+                and counts['remaining_households'] > 0
+            ),
+            key=lambda item: (item[0], item[1]),
+        )
+
+        self.daily_target_lsoas = [
+            lsoa for _, lsoa in ranked_lsoas[:target_count]
+        ]
+        return self.daily_target_lsoas
 
     def register_completion(self, household, characteristic, step_number):
         """
@@ -241,6 +282,7 @@ class FieldWorkModel(mesa.Model):
                 for _ in range(target_count)
             ],
         )
+        self.update_daily_target_lsoas(target_count=target_count)
 
     def step(self):
         """

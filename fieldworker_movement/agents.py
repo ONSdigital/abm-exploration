@@ -15,7 +15,8 @@ class Household(mesa.Agent):
     Household agents, located in the model at the nearest road/path node to 
     their actual geographical location.
     """
-    # Start with one type of household. Maybe have another household class that inherits later on?
+    # Start with one type of household. Maybe have another household class that 
+    # inherits later on?
     def __init__(self, model, node, lsoa, response_chance=0.5,
                  initial_completion_rate=0.0, ongoing_completion_rate=0.0,
                  survey_completed=False):

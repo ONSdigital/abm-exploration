@@ -50,7 +50,9 @@ def init_callbacks(app, state):
     )
     def handle_controls(play_clicks, pause_clicks, reset_clicks,
                         field_staff_value, store, step_duration):
-        """Toggle running state or reset the model."""
+        """
+        Toggle running state or reset the model.
+        """
         store = store or {}
         current_staff = len(state['model'].field_staff)
         store.setdefault('current_field_staff', current_staff)
@@ -109,10 +111,11 @@ def init_callbacks(app, state):
         State('metric-store', 'data'),
         State('choropleth-interval-slider', 'value'),
         State('step-duration-slider', 'value'),
+        State('steps-per-tick-slider', 'value'),
         prevent_initial_call=True,
     )
     def tick(n_intervals, store, _reset_clicks, metric, choropleth_interval, 
-             step_duration):
+             step_duration, steps_per_tick):
         """
         Advance the simulation by one step and patch:
           - Trace 1 (field staff) every step.
@@ -134,7 +137,23 @@ def init_callbacks(app, state):
             )
 
         day_before_step = model.current_day
-        model.step()
+
+        steps_per_tick = int(steps_per_tick or 1)
+        for _ in range(steps_per_tick):
+            day_before_step = model.current_day
+            model.step()
+
+            if model.current_day != day_before_step:
+                pending_staff = int(store.get('pending_field_staff', 
+                                              len(model.field_staff)))
+                current_staff_count = int(store.get('current_field_staff', 
+                                                    len(model.field_staff)))
+                if pending_staff != current_staff_count:
+                    model.set_field_staff_count(pending_staff)
+                else:
+                    model.update_daily_target_lsoas()
+                store['current_field_staff'] = len(model.field_staff)
+
         store['step'] = model.steps
 
         # Apply queued field staff changes only at the start of a new day.
@@ -147,6 +166,8 @@ def init_callbacks(app, state):
             )
             if pending_staff != current_staff:
                 model.set_field_staff_count(pending_staff)
+            else:
+                model.update_daily_target_lsoas()
 
         store['current_field_staff'] = len(model.field_staff)
 

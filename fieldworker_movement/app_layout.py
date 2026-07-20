@@ -154,18 +154,33 @@ def create_layout(initial_fig):
                                          'color': '#555'}),
                     ], style={'width': '220px', 'marginRight': '32px'}),
 
+                    html.Div([
+                        html.Span('Steps per tick', 
+                                  style={'fontWeight': 'bold'}),
+                        dcc.Slider(
+                            id='steps-per-tick-slider',
+                            min=1, max=100, step=1, value=1,
+                            marks={1: '1', 25: '25', 50: '50', 100: '100'},
+                            tooltip={'placement': 'bottom', 
+                                     'always_visible': False},
+                        ),
+                        html.Span('(higher = faster, same fidelity)',
+                                style={'fontSize': '0.8em', 'color': '#555'}),
+                    ], style={'width': '220px', 'marginRight': '32px'}),
+
                     # Seconds per simulation step slider
                     html.Div([
                         html.Span('Seconds per step',
                                   style={'fontWeight': 'bold'}),
                         dcc.Slider(
                             id='step-duration-slider',
-                            min=1, max=900, step=60, value=60,
-                            marks={1: '1', 300: '300', 600: '600',
-                                   900: '900'},
+                            min=1, max=30, step=1, value=1,
+                            marks={1: '1', 15: '15', 30: '30'},
                             tooltip={'placement': 'bottom',
                                      'always_visible': False},
                         ),
+                        html.Span('(higher = loss of fidelity)',
+                                  style={'fontSize': '0.8em', 'color': '#555'}),
                     ], style={'width': '220px', 'marginRight': '32px'}),
 
                     # Number of field staff slider
@@ -179,7 +194,7 @@ def create_layout(initial_fig):
                             tooltip={'placement': 'bottom',
                                      'always_visible': False},
                         ),
-                        html.Span('(applied at next day boundary)',
+                        html.Span('(applied at start of next day)',
                                   style={'fontSize': '0.8em',
                                          'color': '#555'}),
                     ], style={'width': '220px'}),
