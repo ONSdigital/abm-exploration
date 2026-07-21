@@ -159,8 +159,8 @@ def create_layout(initial_fig):
                                   style={'fontWeight': 'bold'}),
                         dcc.Slider(
                             id='steps-per-tick-slider',
-                            min=1, max=100, step=1, value=1,
-                            marks={1: '1', 25: '25', 50: '50', 100: '100'},
+                            min=1, max=1000, step=1, value=1,
+                            marks={1: '1', 100: '100', 500: '500', 1000: '1000'},
                             tooltip={'placement': 'bottom', 
                                      'always_visible': False},
                         ),
@@ -208,6 +208,26 @@ def create_layout(initial_fig):
                     'borderTop': '1px solid #ccc',
                     'marginTop': '4px',
                 }),
+            ], style={'marginLeft': '16px'}),
+
+            html.Details([
+                html.Summary('Daily Interaction Time %', style={
+                    'cursor': 'pointer',
+                    'marginLeft': '24px',
+                    'fontWeight': 'bold',
+                    'userSelect': 'none',
+                }),
+                html.Div(
+                    id='daily-interaction-breakdown',
+                    children='No completed days yet.',
+                    style={
+                        'padding': '12px 16px',
+                        'background': '#e4e4e4',
+                        'borderTop': '1px solid #ccc',
+                        'marginTop': '4px',
+                        'fontFamily': 'monospace',
+                    },
+                ),
             ], style={'marginLeft': '16px'}),
 
         ], style={'padding': '8px', 'background': '#f0f0f0',

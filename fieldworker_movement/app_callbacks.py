@@ -2,7 +2,7 @@
 Dash callbacks for the Fieldworker ABM visualisation.
 """
 import dash
-from dash import Input, Output, State, Patch, no_update
+from dash import Input, Output, State, Patch, no_update, html
 
 from config import num_field_staff, METRIC_METADATA
 
@@ -205,6 +205,25 @@ def init_callbacks(app, state):
             f'{staff_suffix}',
             store,
         )
+
+    @app.callback(
+        Output('daily-interaction-breakdown', 'children'),
+        Input('interval', 'n_intervals'),
+        Input('reset-btn', 'n_clicks'),
+    )
+    def update_daily_interaction_breakdown(_n_intervals, _reset_clicks):
+        """
+        Render finalized end-of-day interaction-time percentages.
+        """
+        day_pct = state['model'].daily_interaction_time_pct
+        if not day_pct:
+            return 'No completed days yet.'
+
+        lines = []
+        for day in sorted(day_pct):
+            pct_value = round(day_pct[day])
+            lines.append(html.Div(f'Day {day}: {pct_value}%'))
+        return lines
 
     @app.callback(
         Output('map', 'figure', allow_duplicate=True),

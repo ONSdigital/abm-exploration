@@ -4,6 +4,8 @@ mechanisms such as agent interaction and movement.
 
 Aaron Stace, 03/07/2026
 """
+import math
+import networkx as nx
 import mesa
 from mesa.space import NetworkGrid
 from collections import defaultdict
@@ -29,6 +31,8 @@ class FieldWorkModel(mesa.Model):
     workers and the geographic area they operate within.
     """
 
+    DAILY_HOUSEHOLDS_PER_AGENT = 10
+
     def __init__(self, num_field_staff):
         
         super().__init__()
@@ -45,7 +49,12 @@ class FieldWorkModel(mesa.Model):
         self.current_day = 1
         self.seconds_since_midnight = self.workday_start_seconds
         self.total_work_seconds = 0
+        self.current_day_interaction_seconds = 0.0
+        self.daily_interaction_time_pct = {}
         self.daily_target_lsoas = []
+        self._prev_day = 1  # Track day boundaries for routing trigger
+        self.shortest_path_cache = {}  # Cache for road-network distances: 
+                                       # (node_a, node_b) -> length
 
         gdf = load_network_data(ROADS_FILEPATH, PATHS_FILEPATH)
         G = build_graph_from_shapefile(gdf)
@@ -96,6 +105,11 @@ class FieldWorkModel(mesa.Model):
         for household in self.households:
             self.node_to_households[household.node].append(household)
 
+        # Build an LSOA → [Household, ...] lookup for daily route assignment.
+        self.lsoa_to_households = defaultdict(list)
+        for household in self.households:
+            self.lsoa_to_households[household.lsoa].append(household)
+
         # One entry per step: {'step': N, 'lsoa_stats': {lsoa: {knocks, interactions}}}
         self.step_history = []
 
@@ -116,6 +130,7 @@ class FieldWorkModel(mesa.Model):
             node=[self.random.choice(self.node_list) for _ in range(num_field_staff)]
         )
         self.update_daily_target_lsoas()
+        self.assign_agents_to_target_lsoas()
 
     def get_lsoa_completion_rates(self, lsoa_code):
         """
@@ -128,14 +143,15 @@ class FieldWorkModel(mesa.Model):
 
     def update_daily_target_lsoas(self, target_count=None):
         """
-        Store the current day's lowest-completion incomplete LSOAs. Number 
-        of them is determined by number of field staff available that day.
+        Store the current day's lowest-completion incomplete LSOAs. Two agents 
+        in each LSOA, except when odd no. of agents in which case one agent in 
+        one of the LSOAs.
 
         Parameters
         ----------
         target_count : int or None
-            Maximum number of unique LSOA codes to store. Defaults to the
-            current number of field staff agents.
+            Maximum number of unique LSOA codes to store. Defaults to 
+            ceil(num_agents/2).
 
         Returns
         -------
@@ -143,7 +159,7 @@ class FieldWorkModel(mesa.Model):
             The ordered LSOA codes selected for the current day.
         """
         if target_count is None:
-            target_count = len(self.field_staff) / 2
+            target_count = math.ceil(len(self.field_staff) / 2)
 
         target_count = max(0, int(target_count))
 
@@ -261,6 +277,248 @@ class FieldWorkModel(mesa.Model):
         northings = [position[1] for position in display_positions]
         return to_wgs84(eastings, northings)
 
+    def get_incomplete_nodes_for_lsoa(self, lsoa_code):
+        """
+        Return unique nodes in an LSOA that have at least one incomplete household.
+
+        Parameters
+        ----------
+        lsoa_code : str
+            The LSOA code to retrieve nodes for.
+
+        Returns
+        -------
+        list[tuple]
+            Unique (easting, northing) nodes with incomplete households.
+        """
+        nodes = []
+        seen = set()
+        for household in self.lsoa_to_households.get(lsoa_code, []):
+            if not household.survey_completed and household.node not in seen:
+                nodes.append(household.node)
+                seen.add(household.node)
+        return nodes
+
+    def get_road_distance(self, node_a, node_b):
+        """
+        Get the road-network shortest-path distance between two nodes.
+        Uses a cache to avoid recomputing the same pair.
+
+        Parameters
+        ----------
+        node_a, node_b : tuple
+            (easting, northing) coordinate tuples.
+
+        Returns
+        -------
+        float
+            The shortest-path length in metres, or float('inf') if no path exists.
+        """
+        # Normalize key to avoid (A, B) and (B, A) as separate entries
+        key = tuple(sorted([node_a, node_b]))
+        if key in self.shortest_path_cache:
+            return self.shortest_path_cache[key]
+
+        try:
+            dist = nx.shortest_path_length(
+                self.graph,
+                node_a,
+                node_b,
+                weight='length'
+            )
+        except (nx.NetworkXNoPath, nx.NodeNotFound):
+            dist = float('inf')
+
+        self.shortest_path_cache[key] = dist
+        return dist
+
+    def get_incomplete_households_for_lsoa(self, lsoa_code):
+        """
+        Return incomplete households in an LSOA.
+
+        Parameters
+        ----------
+        lsoa_code : str
+            The LSOA code to retrieve households for.
+
+        Returns
+        -------
+        list[Household]
+            Incomplete households for the LSOA.
+        """
+        return [
+            household for household in self.lsoa_to_households.get(lsoa_code, [])
+            if not household.survey_completed
+        ]
+
+    def _build_open_tsp_route(self, start_node, stop_nodes):
+        """
+        Build an exact minimum-distance open TSP route from a start node
+        through all stop nodes along the road network.
+
+        Parameters
+        ----------
+        start_node : tuple
+            Start node for the route.
+        stop_nodes : list[tuple]
+            Nodes that must be visited.
+
+        Returns
+        -------
+        list[tuple]
+            Ordered stop nodes to visit.
+        """
+        unique_stops = list(dict.fromkeys(stop_nodes))
+        if not unique_stops:
+            return []
+
+        if len(unique_stops) == 1:
+            return unique_stops
+
+        n = len(unique_stops)
+        start_to_stop = [
+            self.get_road_distance(start_node, unique_stops[j])
+            for j in range(n)
+        ]
+        stop_to_stop = [
+            [self.get_road_distance(unique_stops[i], unique_stops[j]) for j in range(n)]
+            for i in range(n)
+        ]
+
+        inf = float('inf')
+        dp = [[inf] * n for _ in range(1 << n)]
+        parent = [[None] * n for _ in range(1 << n)]
+
+        for j in range(n):
+            dp[1 << j][j] = start_to_stop[j]
+
+        for mask in range(1 << n):
+            for last in range(n):
+                cost = dp[mask][last]
+                if cost == inf or not (mask & (1 << last)):
+                    continue
+                for nxt in range(n):
+                    if mask & (1 << nxt):
+                        continue
+                    new_mask = mask | (1 << nxt)
+                    new_cost = cost + stop_to_stop[last][nxt]
+                    if new_cost < dp[new_mask][nxt]:
+                        dp[new_mask][nxt] = new_cost
+                        parent[new_mask][nxt] = last
+
+        full_mask = (1 << n) - 1
+        end_idx = min(range(n), key=lambda j: dp[full_mask][j])
+        if dp[full_mask][end_idx] == inf:
+            return unique_stops
+
+        order_indices = []
+        mask = full_mask
+        current = end_idx
+        while current is not None:
+            order_indices.append(current)
+            prev = parent[mask][current]
+            mask &= ~(1 << current)
+            current = prev
+
+        order_indices.reverse()
+        return [unique_stops[idx] for idx in order_indices]
+
+    def assign_daily_households_and_routes(self, lsoa_code, agents):
+        """
+        For one LSOA, assign up to 10 unique households per agent for the day
+        and build each agent's TSP visit order.
+        """
+        if not agents:
+            return
+
+        incomplete_households = self.get_incomplete_households_for_lsoa(lsoa_code)
+        self.random.shuffle(incomplete_households)
+
+        cursor = 0
+        for agent in agents:
+            agent.clear_route()
+            agent.vrp_waypoint_index = 0
+
+            next_cursor = cursor + self.DAILY_HOUSEHOLDS_PER_AGENT
+            assigned_households = incomplete_households[cursor:next_cursor]
+            cursor = next_cursor
+
+            agent.daily_assigned_households = assigned_households
+            target_nodes = [household.node for household in assigned_households]
+            agent.vrp_waypoints = self._build_open_tsp_route(agent.node, target_nodes)
+
+    def assign_agents_to_target_lsoas(self):
+        """
+        Assign field workers to target LSOAs for the current day. Agents 
+        continue in the same LSOA if it remains in the target list. 
+        Reassignment when LSOAs drop out of target list.
+
+        Capacity rule: distribute agents such that each target LSOA has 2 agents,
+        except when total agent count is odd, in which case exactly one target
+        LSOA has 1 agent. The single-agent LSOA is chosen as the least urgent
+        (highest completion ratio) among targets.
+
+        Returns
+        -------
+        dict
+            Per-LSOA assignment: {lsoa_code: [agent, ...]}
+        """
+        carryover_agents = []  # Agents staying in their current LSOA
+        reassign_agents = []   # Agents needing new LSOA
+
+        for agent in self.field_staff:
+            if agent.assigned_lsoa and agent.assigned_lsoa in \
+                                                    self.daily_target_lsoas:
+                carryover_agents.append(agent)
+            else:
+                reassign_agents.append(agent)
+
+        # Build current assignments from carryover
+        assignments = {}  # {lsoa_code: [agent, ...]}
+        for agent in carryover_agents:
+            lsoa = agent.assigned_lsoa
+            if lsoa not in assignments:
+                assignments[lsoa] = []
+            assignments[lsoa].append(agent)
+
+        num_agents = len(self.field_staff)
+        num_target_lsoas = len(self.daily_target_lsoas)
+        single_agent_lsoa = None
+
+        if num_agents % 2 == 1 and num_target_lsoas > 0:
+            # Pick the least urgent LSOA for the single agent
+            single_agent_lsoa = max(
+                self.daily_target_lsoas,
+                key=lambda lsoa: (
+                    self.lsoa_stats[lsoa]['questionnaire_completions']
+                    / max(1, self.lsoa_stats[lsoa]['total_households'])
+                )
+            )
+
+        # Assign reassign_agents to underfilled LSOAs
+        for agent in reassign_agents:
+            for lsoa in self.daily_target_lsoas:
+                capacity = 1 if lsoa == single_agent_lsoa else 2
+                if lsoa not in assignments:
+                    assignments[lsoa] = []
+
+                if len(assignments[lsoa]) < capacity:
+                    agent.assigned_lsoa = lsoa
+                    agent.assigned_day = self.current_day
+                    
+                    incomplete_nodes = self.get_incomplete_nodes_for_lsoa(lsoa)
+                    if incomplete_nodes:
+                        depot_node = self.random.choice(incomplete_nodes)
+                        self.grid.move_agent(agent, depot_node)
+                        agent.node = depot_node
+                    assignments[lsoa].append(agent)
+                    break
+
+        for lsoa, agents in assignments.items():
+            self.assign_daily_households_and_routes(lsoa, agents)
+
+        return assignments
+
     def set_field_staff_count(self, target_count):
         """
         Rebuild the field staff agent set to match a requested count.
@@ -289,10 +547,37 @@ class FieldWorkModel(mesa.Model):
         One step of the model.
         """
         super().step()
+        day_before_step = self.current_day
+
         if self.is_working_time():
             self.advance_electronic_completions()
             self.field_staff.shuffle_do('step')
         self.advance_clock()
+
+        # Day boundary: update target LSOAs and reassign agents
+        if self.current_day != self._prev_day:
+            completed_day = day_before_step
+            staff_capacity_seconds = (
+                len(self.field_staff) * self.workday_duration_seconds
+            )
+            if staff_capacity_seconds > 0:
+                day_pct = (
+                    self.current_day_interaction_seconds
+                    / staff_capacity_seconds
+                ) * 100
+            else:
+                day_pct = 0.0
+
+            self.daily_interaction_time_pct[completed_day] = min(
+                100.0,
+                max(0.0, day_pct),
+            )
+            self.current_day_interaction_seconds = 0.0
+
+            self.update_daily_target_lsoas()
+            self.assign_agents_to_target_lsoas()
+            self._prev_day = self.current_day
+
         # Snapshot cumulative LSOA stats for this step (shallow copy per LSOA).
         self.step_history.append({
             'step': self.steps,
