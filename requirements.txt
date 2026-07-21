@@ -1,3 +1,4 @@
+absl-py==2.5.0
 altair==6.0.0
 annotated-types==0.7.0
 anyio==4.13.0
@@ -32,6 +33,7 @@ httpx==0.28.1
 httpx-sse==0.4.3
 humanize==4.15.0
 idna==3.11
+immutabledict==4.3.1
 importlib_metadata==9.0.0
 ipykernel==7.2.0
 ipython==9.12.0
@@ -66,6 +68,7 @@ neatnet==0.1.6
 nest-asyncio==1.6.0
 networkx==3.6.1
 numpy==2.4.4
+ortools==9.15.6755
 packaging==26.1
 pandas==3.0.2
 parso==0.8.6
@@ -73,6 +76,7 @@ pillow==12.2.0
 platformdirs==4.9.6
 plotly==6.7.0
 prompt_toolkit==3.0.52
+protobuf==6.33.6
 psutil==7.2.2
 psygnal==0.15.1
 pure_eval==0.2.3
