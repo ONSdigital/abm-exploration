@@ -30,10 +30,10 @@ def build_initial_figure(model, centre_lon, centre_lat):
     """
     Construct a Plotly figure with three traces:
       - Trace 0: static address dots (true geographic positions).
-      - Trace 1: field staff positions (updated each simulation step).
-      - Trace 2: LSOA choropleth (updated each N steps, coloured by metric).
+      - Trace 2: field staff positions (updated each simulation step).
+      - Trace 3: LSOA choropleth (updated each N steps, coloured by metric).
     """
-    staff_lons, staff_lats = model.get_field_staff_positions()
+    staff_lons, staff_lats, staff_colors = model.get_field_staff_positions()
 
     fig = go.Figure()
 
@@ -57,16 +57,16 @@ def build_initial_figure(model, centre_lon, centre_lat):
         hoverinfo='skip',
     ))
 
-    # Trace 1 — field staff (updated via Patch each step)
+    # Trace 2 — field staff (updated via Patch each step)
     fig.add_trace(go.Scattermapbox(
         lon=staff_lons,
         lat=staff_lats,
         mode='markers',
-        marker=dict(size=10, color="#0a0001"),
+        marker=dict(size=10, color=staff_colors),
         name='Field staff',
     ))
 
-    # Trace 2 — LSOA choropleth (updated via Patch every N steps)
+    # Trace 3 — LSOA choropleth (updated via Patch every N steps)
     _initial_meta = METRIC_METADATA['knocks']
     fig.add_trace(go.Choroplethmapbox(
         geojson=model.lsoa_geojson,
@@ -159,7 +159,7 @@ def create_layout(initial_fig):
                                   style={'fontWeight': 'bold'}),
                         dcc.Slider(
                             id='steps-per-tick-slider',
-                            min=1, max=1000, step=1, value=1,
+                            min=1, max=1000, step=5, value=100,
                             marks={1: '1', 100: '100', 500: '500', 1000: '1000'},
                             tooltip={'placement': 'bottom', 
                                      'always_visible': False},

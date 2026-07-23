@@ -19,10 +19,10 @@ from config import ROADS_FILEPATH, PATHS_FILEPATH, ADDRESSES_FILEPATH, \
                 LSOA_COMPLETION_FILEPATH, INITIAL_COMPLETION_COLUMN, \
                 ONGOING_COMPLETION_COLUMN, DEFAULT_INITIAL_COMPLETION_RATE, \
                 DEFAULT_ONGOING_COMPLETION_RATE, \
-                DEFAULT_HOUSEHOLD_RESPONSE_CHANCE, \
+                KNOCK_RESPONSE_CHANCE, \
                 walking_speed, \
                 simulation_step_seconds, workday_start_hour, \
-                workday_duration_hours
+                workday_duration_hours, daily_hh_per_agent
 
 
 class FieldWorkModel(mesa.Model):
@@ -31,14 +31,13 @@ class FieldWorkModel(mesa.Model):
     workers and the geographic area they operate within.
     """
 
-    DAILY_HOUSEHOLDS_PER_AGENT = 10
-
     def __init__(self, num_field_staff):
         
         super().__init__()
 
         self.simulation_step_seconds = simulation_step_seconds
         self.walking_speed = walking_speed
+        self.hh_per_agent = daily_hh_per_agent
         self.travel_distance_per_step = (
             self.walking_speed * self.simulation_step_seconds
         )
@@ -74,6 +73,7 @@ class FieldWorkModel(mesa.Model):
             'questionnaire_completions': 0,
             'initial_questionnaire_completions': 0,
             'ongoing_questionnaire_completions': 0,
+            'fieldwork_questionnaire_completions': 0,
             'remaining_households': 0,
             'total_households': 0,
         })
@@ -89,7 +89,7 @@ class FieldWorkModel(mesa.Model):
                 model=self,
                 node=node,
                 lsoa=lsoa,
-                response_chance=DEFAULT_HOUSEHOLD_RESPONSE_CHANCE,
+                knock_response_chance=KNOCK_RESPONSE_CHANCE,
                 initial_completion_rate=completion_rates[INITIAL_COMPLETION_COLUMN],
                 ongoing_completion_rate=completion_rates[ONGOING_COMPLETION_COLUMN],
                 survey_completed=survey_completed,
@@ -200,7 +200,7 @@ class FieldWorkModel(mesa.Model):
         bool
             True if the completion was registered, False if it was ignored
         """
-        if characteristic not in {'initial', 'ongoing'}:
+        if characteristic not in {'initial', 'ongoing', 'fieldwork'}:
             raise ValueError(f"Unknown completion source: {characteristic}")
 
         if not household.survey_completed:
@@ -275,7 +275,13 @@ class FieldWorkModel(mesa.Model):
         ]
         eastings = [position[0] for position in display_positions]
         northings = [position[1] for position in display_positions]
-        return to_wgs84(eastings, northings)
+        colors = [
+            "#00aa44" if agent.has_knocked_all_assigned_households()
+            else "#0a0001"
+            for agent in self.field_staff
+        ]
+        lons, lats = to_wgs84(eastings, northings)
+        return lons, lats, colors
 
     def get_incomplete_nodes_for_lsoa(self, lsoa_code):
         """
@@ -381,7 +387,8 @@ class FieldWorkModel(mesa.Model):
             for j in range(n)
         ]
         stop_to_stop = [
-            [self.get_road_distance(unique_stops[i], unique_stops[j]) for j in range(n)]
+            [self.get_road_distance(unique_stops[i], 
+                                    unique_stops[j]) for j in range(n)]
             for i in range(n)
         ]
 
@@ -432,17 +439,48 @@ class FieldWorkModel(mesa.Model):
             return
 
         incomplete_households = self.get_incomplete_households_for_lsoa(lsoa_code)
-        self.random.shuffle(incomplete_households)
 
-        cursor = 0
         for agent in agents:
             agent.clear_route()
             agent.vrp_waypoint_index = 0
+            agent.households_knocked = set()
 
-            next_cursor = cursor + self.DAILY_HOUSEHOLDS_PER_AGENT
-            assigned_households = incomplete_households[cursor:next_cursor]
-            cursor = next_cursor
+        ordered_agents = list(agents)
+        start_index = (self.current_day - 1) % len(ordered_agents)
+        ordered_agents = ordered_agents[start_index:] + ordered_agents[:start_index]
 
+        assigned_by_agent = {agent: [] for agent in ordered_agents}
+        remaining_households = list(incomplete_households)
+
+        # Round-robin nearest assignment so agents alternate picks fairly.
+        while remaining_households:
+            assigned_this_round = False
+
+            for agent in ordered_agents:
+                if len(assigned_by_agent[agent]) >= self.hh_per_agent:
+                    continue
+
+                ax, ay = agent.node
+                nearest_household = min(
+                    remaining_households,
+                    key=lambda household: (
+                        (household.node[0] - ax) ** 2
+                        + (household.node[1] - ay) ** 2
+                    ),
+                )
+
+                assigned_by_agent[agent].append(nearest_household)
+                remaining_households.remove(nearest_household)
+                assigned_this_round = True
+
+                if not remaining_households:
+                    break
+
+            if not assigned_this_round:
+                break
+
+        for agent in agents:
+            assigned_households = assigned_by_agent.get(agent, [])
             agent.daily_assigned_households = assigned_households
             target_nodes = [household.node for household in assigned_households]
             agent.vrp_waypoints = self._build_open_tsp_route(agent.node, target_nodes)
@@ -463,24 +501,6 @@ class FieldWorkModel(mesa.Model):
         dict
             Per-LSOA assignment: {lsoa_code: [agent, ...]}
         """
-        carryover_agents = []  # Agents staying in their current LSOA
-        reassign_agents = []   # Agents needing new LSOA
-
-        for agent in self.field_staff:
-            if agent.assigned_lsoa and agent.assigned_lsoa in \
-                                                    self.daily_target_lsoas:
-                carryover_agents.append(agent)
-            else:
-                reassign_agents.append(agent)
-
-        # Build current assignments from carryover
-        assignments = {}  # {lsoa_code: [agent, ...]}
-        for agent in carryover_agents:
-            lsoa = agent.assigned_lsoa
-            if lsoa not in assignments:
-                assignments[lsoa] = []
-            assignments[lsoa].append(agent)
-
         num_agents = len(self.field_staff)
         num_target_lsoas = len(self.daily_target_lsoas)
         single_agent_lsoa = None
@@ -495,24 +515,71 @@ class FieldWorkModel(mesa.Model):
                 )
             )
 
-        # Assign reassign_agents to underfilled LSOAs
-        for agent in reassign_agents:
-            for lsoa in self.daily_target_lsoas:
-                capacity = 1 if lsoa == single_agent_lsoa else 2
-                if lsoa not in assignments:
-                    assignments[lsoa] = []
+        # No targets: clear all daily assignment state to avoid stale routes.
+        if not self.daily_target_lsoas:
+            for agent in self.field_staff:
+                agent.assigned_lsoa = None
+                agent.clear_route()
+                agent.vrp_waypoint_index = 0
+                agent.daily_assigned_households = []
+                agent.households_knocked = set()
+                agent.vrp_waypoints = []
+            return {}
 
-                if len(assignments[lsoa]) < capacity:
-                    agent.assigned_lsoa = lsoa
-                    agent.assigned_day = self.current_day
-                    
-                    incomplete_nodes = self.get_incomplete_nodes_for_lsoa(lsoa)
-                    if incomplete_nodes:
-                        depot_node = self.random.choice(incomplete_nodes)
-                        self.grid.move_agent(agent, depot_node)
-                        agent.node = depot_node
-                    assignments[lsoa].append(agent)
-                    break
+        capacity_by_lsoa = {
+            lsoa: (1 if lsoa == single_agent_lsoa else 2)
+            for lsoa in self.daily_target_lsoas
+        }
+        assignments = {lsoa: [] for lsoa in self.daily_target_lsoas}
+        reassign_agents = []
+
+        # Keep carryover agents only while each LSOA has spare capacity.
+        for agent in self.field_staff:
+            lsoa = agent.assigned_lsoa
+            if lsoa in assignments and len(assignments[lsoa]) < capacity_by_lsoa[lsoa]:
+                assignments[lsoa].append(agent)
+            else:
+                reassign_agents.append(agent)
+
+        # Fill remaining capacity from unassigned agents.
+        for agent in reassign_agents:
+            placed = False
+            for lsoa in self.daily_target_lsoas:
+                if len(assignments[lsoa]) >= capacity_by_lsoa[lsoa]:
+                    continue
+
+                agent.assigned_lsoa = lsoa
+                agent.assigned_day = self.current_day
+
+                incomplete_nodes = self.get_incomplete_nodes_for_lsoa(lsoa)
+                if incomplete_nodes:
+                    depot_node = self.random.choice(incomplete_nodes)
+                    self.grid.move_agent(agent, depot_node)
+                    agent.node = depot_node
+
+                assignments[lsoa].append(agent)
+                placed = True
+                break
+
+            if not placed:
+                agent.assigned_lsoa = None
+                agent.clear_route()
+                agent.vrp_waypoint_index = 0
+                agent.daily_assigned_households = []
+                agent.households_knocked = set()
+                agent.vrp_waypoints = []
+
+        # Start each day from a fresh random incomplete node for every assigned
+        # agent, including carryovers that stayed in the same LSOA.
+        for lsoa, agents in assignments.items():
+            incomplete_nodes = self.get_incomplete_nodes_for_lsoa(lsoa)
+            if not incomplete_nodes:
+                continue
+
+            for agent in agents:
+                depot_node = self.random.choice(incomplete_nodes)
+                self.grid.move_agent(agent, depot_node)
+                agent.node = depot_node
 
         for lsoa, agents in assignments.items():
             self.assign_daily_households_and_routes(lsoa, agents)
@@ -541,6 +608,7 @@ class FieldWorkModel(mesa.Model):
             ],
         )
         self.update_daily_target_lsoas(target_count=target_count)
+        self.assign_agents_to_target_lsoas()
 
     def step(self):
         """

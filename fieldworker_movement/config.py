@@ -14,7 +14,7 @@ LSOAS_FILEPATH = "C:\\Users\\stacea\\abm-exploration\\fieldworker_movement\\newc
 # Cached network GeoDataFrame written after the first neatnet.close_gaps run.
 # Delete this file to force a rebuild (e.g. after updating the shapefiles).
 NETWORK_CACHE_FILEPATH = "C:\\Users\\stacea\\abm-exploration\\fieldworker_movement\\network_graphs\\network_cache.gpkg"
-LSOA_COMPLETION_FILEPATH = "C:\\Users\\stacea\\abm-exploration\\fieldworker_movement\\addresses\\lsoa_completion_rates.csv"
+LSOA_COMPLETION_FILEPATH = "C:\\Users\\stacea\\abm-exploration\\fieldworker_movement\\addresses\\lsoa_completion_rates_low_variation.csv"
 
 
 #--------------------------------ADDRESS FILE--------------------------------#
@@ -29,7 +29,9 @@ INITIAL_COMPLETION_COLUMN = 'initial_completion_rate'
 ONGOING_COMPLETION_COLUMN = 'ongoing_completion_rate'
 DEFAULT_INITIAL_COMPLETION_RATE = 0.0
 DEFAULT_ONGOING_COMPLETION_RATE = 0.0
-DEFAULT_HOUSEHOLD_RESPONSE_CHANCE = 0.5
+KNOCK_RESPONSE_CHANCE = 0.8
+KNOCK_COMPLETION_CHANCE = 0.3
+INTERACTION_COMPLETION_CHANCE = 0.8
 
 
 #-----------------------------MODEL PARAMETERS----------------------------#
@@ -37,6 +39,7 @@ DEFAULT_HOUSEHOLD_RESPONSE_CHANCE = 0.5
 num_field_staff = 10  # Default number of field staff agents in the model.
 walking_speed = 1.4  # Average walking speed of agents in m/s
 driving_speed = 13.9  # Average driving speed of agents in m/s
+daily_hh_per_agent = 30 # No. of households an agent is told to visit daily
 
 simulation_step_seconds = 30  # Simulated seconds advanced on each model step.
 workday_start_hour = 9  # Simulated clock time when each workday begins.

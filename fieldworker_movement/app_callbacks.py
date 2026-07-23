@@ -136,8 +136,6 @@ def init_callbacks(app, state):
                 model.walking_speed * model.simulation_step_seconds
             )
 
-        day_before_step = model.current_day
-
         steps_per_tick = int(steps_per_tick or 1)
         for _ in range(steps_per_tick):
             day_before_step = model.current_day
@@ -150,32 +148,19 @@ def init_callbacks(app, state):
                                                     len(model.field_staff)))
                 if pending_staff != current_staff_count:
                     model.set_field_staff_count(pending_staff)
-                else:
-                    model.update_daily_target_lsoas()
                 store['current_field_staff'] = len(model.field_staff)
 
         store['step'] = model.steps
 
-        # Apply queued field staff changes only at the start of a new day.
-        if model.current_day != day_before_step:
-            pending_staff = int(
-                store.get('pending_field_staff', len(model.field_staff))
-            )
-            current_staff = int(
-                store.get('current_field_staff', len(model.field_staff))
-            )
-            if pending_staff != current_staff:
-                model.set_field_staff_count(pending_staff)
-            else:
-                model.update_daily_target_lsoas()
-
         store['current_field_staff'] = len(model.field_staff)
 
-        staff_lons, staff_lats = model.get_field_staff_positions()
+        staff_lons, staff_lats, staff_colors = \
+                                            model.get_field_staff_positions()
 
         patched_fig = Patch()
         patched_fig['data'][2]['lon'] = staff_lons
         patched_fig['data'][2]['lat'] = staff_lats
+        patched_fig['data'][2]['marker']['color'] = staff_colors
 
         interval = choropleth_interval or 1
         metric = metric or 'knocks'

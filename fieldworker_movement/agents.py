@@ -7,7 +7,10 @@ Aaron Stace, 08/06/2026
 import mesa
 import networkx as nx
 
-from config import hh_interaction_mean, hh_interaction_std
+from config import hh_interaction_mean, hh_interaction_std, \
+                    INTERACTION_COMPLETION_CHANCE, \
+                    KNOCK_COMPLETION_CHANCE, \
+                    KNOCK_RESPONSE_CHANCE
 
 
 class Household(mesa.Agent):
@@ -17,7 +20,8 @@ class Household(mesa.Agent):
     """
     # Start with one type of household. Maybe have another household class that 
     # inherits later on?
-    def __init__(self, model, node, lsoa, response_chance=0.5,
+    def __init__(self, model, node, lsoa, 
+                 knock_response_chance=KNOCK_RESPONSE_CHANCE,
                  initial_completion_rate=0.0, ongoing_completion_rate=0.0,
                  survey_completed=False):
 
@@ -27,7 +31,7 @@ class Household(mesa.Agent):
         self.lsoa = lsoa
         model.grid.place_agent(self, node)
 
-        self.response_chance = response_chance
+        self.knock_response_chance = knock_response_chance
         self.initial_completion_rate = initial_completion_rate
         self.ongoing_completion_rate = ongoing_completion_rate
         self.survey_completed = survey_completed
@@ -85,29 +89,39 @@ class FieldWorker(mesa.Agent):
         self.vrp_waypoints = []  # Ordered list of target household nodes for this agent
         self.vrp_waypoint_index = 0  # Current position in waypoints list
         self.daily_assigned_households = []  # Households allocated for today's workload
+        self.households_knocked = set()  # Assigned households already knocked today
         self.assigned_day = None  # Day when this agent was last assigned (for diagnostics)
 
     def has_pending_assigned_household_at_node(self, node):
         """
-        Return True if the node contains at least one incomplete household
-        from this agent's daily assignment.
+        Return True if the node contains at least one assigned household that
+        has not yet been knocked by this agent.
         """
         if node is None:
             return False
 
         return any(
-            (household.node == node) and (not household.survey_completed)
+            (household.node == node) and (household not in self.households_knocked)
             for household in self.daily_assigned_households
         )
 
     def has_pending_assigned_households(self):
         """
-        Return True if this agent still has incomplete assigned households.
+        Return True if this agent still has assigned households to knock on.
         """
         return any(
-            not household.survey_completed
+            household not in self.households_knocked
             for household in self.daily_assigned_households
         )
+
+    def has_knocked_all_assigned_households(self):
+        """
+        Return True if this agent has knocked all households on today's list.
+        """
+        if not self.daily_assigned_households:
+            return False
+
+        return not self.has_pending_assigned_households()
 
     def clear_route(self):
         """
@@ -370,9 +384,10 @@ class FieldWorker(mesa.Agent):
             True if someone answers the door, False otherwise.
         """
         self.model.lsoa_stats[household.lsoa]['knocks'] += 1
+        self.households_knocked.add(household)
         # If not in, put in a postcard. Does this prompt a response? Does it 
         # annoy them?
-        return self.random.random() < household.response_chance
+        return self.random.random() < household.knock_response_chance
 
     def interaction(self, household, mu, std):
         """
@@ -407,7 +422,8 @@ class FieldWorker(mesa.Agent):
         """
         candidates = [
             household for household in self.daily_assigned_households
-            if household.node == self.node and not household.survey_completed
+            if household.node == self.node and household not 
+                                                in self.households_knocked
         ]
         if not candidates:
             return
@@ -422,6 +438,18 @@ class FieldWorker(mesa.Agent):
             interaction_seconds = max(0.0, interaction_length)
             self.busy_time_remaining_seconds += interaction_seconds
             self.model.current_day_interaction_seconds += interaction_seconds
+            if self.random.random() < INTERACTION_COMPLETION_CHANCE:
+                self.model.register_completion(
+                    household,
+                    characteristic='fieldwork',
+                    step_number=self.model.steps,
+                )
+        elif self.random.random() < KNOCK_COMPLETION_CHANCE:
+            self.model.register_completion(
+                household,
+                characteristic='fieldwork',
+                step_number=self.model.steps,
+            )
 
     def step(self):
         """
