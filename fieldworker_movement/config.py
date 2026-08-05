@@ -7,7 +7,7 @@ Aaron Stace, 03/07/2026
 
 # File paths need two backslashes otherwise the code will break.
 ADDRESSES_FILEPATH = "C:\\Users\\stacea\\abm-exploration\\fieldworker_movement\\addresses\\Raw_Address_Data_Newcastle_April_2025.csv"
-ROADS_FILEPATH = "C:\\Users\\stacea\\abm-exploration\\fieldworker_movement\\newcastle_upon_tyne_shapefiles\\Roads\\Newcastle_Upon_Tyne_Roads.gpkg"
+ROADS_FILEPATH = "C:\\Users\\stacea\\abm-exploration\\fieldworker_movement\\newcastle_upon_tyne_shapefiles\\Roads\\Newcastle_Upon_Tyne_Roads_2.gpkg"
 PATHS_FILEPATH = "C:\\Users\\stacea\\abm-exploration\\fieldworker_movement\\newcastle_upon_tyne_shapefiles\\Paths\\Newcastle_Upon_Tyne_Paths.gpkg"
 LSOAS_FILEPATH = "C:\\Users\\stacea\\abm-exploration\\fieldworker_movement\\newcastle_upon_tyne_shapefiles\\LSOAs\\LSOAs_Newcastle_Upon_Tyne.gpkg"
 
