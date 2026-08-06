@@ -2,12 +2,10 @@
 Dash callbacks for the Fieldworker ABM visualisation.
 """
 import dash
-from dash import Input, Output, State, Patch, no_update, html
-
-from config import num_field_staff, METRIC_METADATA
-
-from fieldwork_model import FieldWorkModel
 from app_layout import build_initial_figure
+from config import METRIC_METADATA, daily_hh_per_agent, num_field_staff
+from dash import Input, Output, Patch, State, html, no_update
+from fieldwork_model import FieldWorkModel
 
 
 def _pct(model, lsoa, metric):
@@ -44,19 +42,23 @@ def init_callbacks(app, state):
         Input('pause-btn', 'n_clicks'),
         Input('reset-btn', 'n_clicks'),
         Input('field-staff-slider', 'value'),
+        Input('daily-hh-per-agent-slider', 'value'),
         State('run-store', 'data'),
         State('step-duration-slider', 'value'),
         prevent_initial_call=True,
     )
     def handle_controls(play_clicks, pause_clicks, reset_clicks,
-                        field_staff_value, store, step_duration):
+                        field_staff_value, daily_hh_value, store, step_duration):
         """
         Toggle running state or reset the model.
         """
         store = store or {}
         current_staff = len(state['model'].field_staff)
+        current_daily_hh = state['model'].hh_per_agent
         store.setdefault('current_field_staff', current_staff)
         store.setdefault('pending_field_staff', current_staff)
+        store.setdefault('current_daily_hh_per_agent', current_daily_hh)
+        store.setdefault('pending_daily_hh_per_agent', current_daily_hh)
 
         triggered = dash.callback_context.triggered_id
 
@@ -66,7 +68,9 @@ def init_callbacks(app, state):
             store['running'] = False
         elif triggered == 'reset-btn':
             selected_staff = int(field_staff_value or num_field_staff)
+            selected_daily_hh = int(daily_hh_value or daily_hh_per_agent)
             state['model'] = FieldWorkModel(selected_staff)
+            state['model'].hh_per_agent = selected_daily_hh
             if step_duration is not None:
                 state['model'].simulation_step_seconds = step_duration
                 state['model'].travel_distance_per_step = (
@@ -79,9 +83,15 @@ def init_callbacks(app, state):
             store['step'] = 0
             store['current_field_staff'] = selected_staff
             store['pending_field_staff'] = selected_staff
+            store['current_daily_hh_per_agent'] = selected_daily_hh
+            store['pending_daily_hh_per_agent'] = selected_daily_hh
         elif triggered == 'field-staff-slider':
             store['pending_field_staff'] = int(
                 field_staff_value or store['current_field_staff']
+            )
+        elif triggered == 'daily-hh-per-agent-slider':
+            store['pending_daily_hh_per_agent'] = int(
+                daily_hh_value or store['current_daily_hh_per_agent']
             )
 
         return store
@@ -129,6 +139,9 @@ def init_callbacks(app, state):
         model = state['model']
         store.setdefault('current_field_staff', len(model.field_staff))
         store.setdefault('pending_field_staff', store['current_field_staff'])
+        store.setdefault('current_daily_hh_per_agent', model.hh_per_agent)
+        store.setdefault('pending_daily_hh_per_agent',
+                 store['current_daily_hh_per_agent'])
 
         if step_duration is not None:
             model.simulation_step_seconds = step_duration
@@ -146,13 +159,30 @@ def init_callbacks(app, state):
                                               len(model.field_staff)))
                 current_staff_count = int(store.get('current_field_staff', 
                                                     len(model.field_staff)))
+                pending_daily_hh = int(
+                    store.get('pending_daily_hh_per_agent', model.hh_per_agent)
+                )
+                current_daily_hh = int(
+                    store.get('current_daily_hh_per_agent', model.hh_per_agent)
+                )
+
+                # Apply pending daily household target and staff count together
+                # at day rollover to keep day-level assignment changes coherent.
+                model.hh_per_agent = pending_daily_hh
+
                 if pending_staff != current_staff_count:
                     model.set_field_staff_count(pending_staff)
+                elif pending_daily_hh != current_daily_hh:
+                    model.update_daily_target_lsoas()
+                    model.assign_agents_to_target_lsoas()
+
                 store['current_field_staff'] = len(model.field_staff)
+                store['current_daily_hh_per_agent'] = model.hh_per_agent
 
         store['step'] = model.steps
 
         store['current_field_staff'] = len(model.field_staff)
+        store['current_daily_hh_per_agent'] = model.hh_per_agent
 
         staff_lons, staff_lats, staff_colors = \
                                             model.get_field_staff_positions()
@@ -176,18 +206,32 @@ def init_callbacks(app, state):
 
         current_staff = int(store['current_field_staff'])
         pending_staff = int(store.get('pending_field_staff', current_staff))
+        current_daily_hh = int(store.get('current_daily_hh_per_agent',
+                                         model.hh_per_agent))
+        pending_daily_hh = int(store.get('pending_daily_hh_per_agent',
+                                         current_daily_hh))
+
+        suffix_parts = []
         if pending_staff != current_staff:
-            staff_suffix = (
-                f' | Staff: {current_staff} '
-                f'(pending {pending_staff} next day)'
+            suffix_parts.append(
+                f'Staff: {current_staff} (pending {pending_staff} next day)'
             )
         else:
-            staff_suffix = f' | Staff: {current_staff}'
+            suffix_parts.append(f'Staff: {current_staff}')
+
+        if pending_daily_hh != current_daily_hh:
+            suffix_parts.append(
+                f'Daily hh/agent: {current_daily_hh} '
+                f'(pending {pending_daily_hh} next day)'
+            )
+        else:
+            suffix_parts.append(f'Daily hh/agent: {current_daily_hh}')
+
+        status_suffix = ' | ' + ' | '.join(suffix_parts)
 
         return (
             patched_fig,
-            f'Step: {model.steps} | {model.format_simulation_time()}'
-            f'{staff_suffix}',
+            f'Step: {model.steps} | {model.format_simulation_time()}{status_suffix}',
             store,
         )
 

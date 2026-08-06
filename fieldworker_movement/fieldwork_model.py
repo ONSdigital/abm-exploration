@@ -5,24 +5,40 @@ mechanisms such as agent interaction and movement.
 Aaron Stace, 03/07/2026
 """
 import math
-import networkx as nx
-import mesa
-from mesa.space import NetworkGrid
 from collections import defaultdict
 
+import mesa
+import networkx as nx
 from agents import FieldWorker, Household
-from mapping import build_graph_from_shapefile, load_addresses, \
-    snap_addresses_to_nodes, load_network_data, load_lsoa_geojson, to_wgs84, \
-    load_lsoa_completion_rates, connect_components
-from config import ROADS_FILEPATH, PATHS_FILEPATH, ADDRESSES_FILEPATH, \
-                LSOAS_FILEPATH, LSOA_CODE_COLUMN, \
-                LSOA_COMPLETION_FILEPATH, INITIAL_COMPLETION_COLUMN, \
-                ONGOING_COMPLETION_COLUMN, DEFAULT_INITIAL_COMPLETION_RATE, \
-                DEFAULT_ONGOING_COMPLETION_RATE, \
-                KNOCK_RESPONSE_CHANCE, \
-                walking_speed, \
-                simulation_step_seconds, workday_start_hour, \
-                workday_duration_hours, daily_hh_per_agent
+from config import (
+    ADDRESSES_FILEPATH,
+    DEFAULT_INITIAL_COMPLETION_RATE,
+    DEFAULT_ONGOING_COMPLETION_RATE,
+    INITIAL_COMPLETION_COLUMN,
+    KNOCK_RESPONSE_CHANCE,
+    LSOA_CODE_COLUMN,
+    LSOA_COMPLETION_FILEPATH,
+    LSOAS_FILEPATH,
+    ONGOING_COMPLETION_COLUMN,
+    PATHS_FILEPATH,
+    ROADS_FILEPATH,
+    daily_hh_per_agent,
+    simulation_step_seconds,
+    walking_speed,
+    workday_duration_hours,
+    workday_start_hour,
+)
+from mapping import (
+    build_graph_from_shapefile,
+    connect_components,
+    load_addresses,
+    load_lsoa_completion_rates,
+    load_lsoa_geojson,
+    load_network_data,
+    snap_addresses_to_nodes,
+    to_wgs84,
+)
+from mesa.space import NetworkGrid
 
 
 class FieldWorkModel(mesa.Model):

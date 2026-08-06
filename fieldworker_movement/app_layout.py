@@ -1,13 +1,16 @@
 """
 Dash layout and figure builder for the Fieldworker ABM visualisation. Controls
 the web page visualisation of the model.
-
 Aaron Stace, 06/07/2026
 """
 import plotly.graph_objects as go
+from config import (
+    METRIC_METADATA,
+    daily_hh_per_agent,
+    dash_interval_ms,
+    num_field_staff,
+)
 from dash import dcc, html
-
-from config import METRIC_METADATA, dash_interval_ms
 from mapping import to_wgs84
 
 
@@ -42,7 +45,7 @@ def build_initial_figure(model, centre_lon, centre_lat):
         lon=network_lons,
         lat=network_lats,
         mode='lines',
-        line=dict(width=1, color='blue'),
+        line={'width': 1, 'color': 'blue'},
         name='Road/path network',
         hoverinfo='skip',
     ))
@@ -52,7 +55,7 @@ def build_initial_figure(model, centre_lon, centre_lat):
         lon=model.address_lons,
         lat=model.address_lats,
         mode='markers',
-        marker=dict(size=4, color='grey', opacity=0.5),
+        marker={'size': 4, 'color': 'grey', 'opacity': 0.5},
         name='Addresses',
         hoverinfo='skip',
     ))
@@ -62,7 +65,7 @@ def build_initial_figure(model, centre_lon, centre_lat):
         lon=staff_lons,
         lat=staff_lats,
         mode='markers',
-        marker=dict(size=10, color=staff_colors),
+        marker={'size': 10, 'color': staff_colors},
         name='Field staff',
     ))
 
@@ -84,20 +87,20 @@ def build_initial_figure(model, centre_lon, centre_lat):
     ))
 
     fig.update_layout(
-        mapbox=dict(
-            style='open-street-map',
-            center=dict(lon=centre_lon, lat=centre_lat),
-            zoom=12,
-        ),
+        mapbox={
+            'style': 'open-street-map',
+            'center': {'lon': centre_lon, 'lat': centre_lat},
+            'zoom': 12,
+        },
         # Keeping uirevision constant prevents the map resetting its zoom/pan
         # position every time the figure is patched.
         uirevision='constant',
-        margin=dict(l=0, r=0, t=0, b=0),
-        legend=dict(
-            bgcolor='rgba(255,255,255,0.7)',
-            x=0.01,
-            y=0.99,
-        ),
+        margin={'l': 0, 'r': 0, 't': 0, 'b': 0},
+        legend={
+            'bgcolor': 'rgba(255,255,255,0.7)',
+            'x': 0.01,
+            'y': 0.99,
+        },
     )
     return fig
 
@@ -189,8 +192,24 @@ def create_layout(initial_fig):
                                   style={'fontWeight': 'bold'}),
                         dcc.Slider(
                             id='field-staff-slider',
-                            min=1, max=50, step=1, value=10,
+                            min=1, max=50, step=1, value=num_field_staff,
                             marks={1: '1', 10: '10', 25: '25', 50: '50'},
+                            tooltip={'placement': 'bottom',
+                                     'always_visible': False},
+                        ),
+                        html.Span('(applied at start of next day)',
+                                  style={'fontSize': '0.8em',
+                                         'color': '#555'}),
+                    ], style={'width': '220px', 'marginRight': '32px'}),
+
+                    # Daily households-per-agent slider
+                    html.Div([
+                        html.Span('Daily hh per agent',
+                                  style={'fontWeight': 'bold'}),
+                        dcc.Slider(
+                            id='daily-hh-per-agent-slider',
+                            min=1, max=100, step=1, value=daily_hh_per_agent,
+                            marks={1: '1', 20: '20', 40: '40', 60: '60', 80: '80'},
                             tooltip={'placement': 'bottom',
                                      'always_visible': False},
                         ),

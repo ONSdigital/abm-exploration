@@ -6,11 +6,9 @@ Open http://127.0.0.1:8050 in a browser.
 Aaron Stace, 03/07/2026
 """
 import dash
-
-from fieldwork_model import FieldWorkModel
-from app_layout import build_initial_figure, create_layout
 from app_callbacks import init_callbacks
-
+from app_layout import build_initial_figure, create_layout
+from fieldwork_model import FieldWorkModel
 
 model = FieldWorkModel(num_field_staff=10)  
 

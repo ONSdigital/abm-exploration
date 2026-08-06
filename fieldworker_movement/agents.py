@@ -6,11 +6,13 @@ Aaron Stace, 08/06/2026
 """
 import mesa
 import networkx as nx
-
-from config import hh_interaction_mean, hh_interaction_std, \
-                    INTERACTION_COMPLETION_CHANCE, \
-                    KNOCK_COMPLETION_CHANCE, \
-                    KNOCK_RESPONSE_CHANCE
+from config import (
+    INTERACTION_COMPLETION_CHANCE,
+    KNOCK_COMPLETION_CHANCE,
+    KNOCK_RESPONSE_CHANCE,
+    hh_interaction_mean,
+    hh_interaction_std,
+)
 
 
 class Household(mesa.Agent):
