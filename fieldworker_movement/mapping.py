@@ -4,23 +4,31 @@ depiction for the field staff agent based model.
 
 Aaron Stace, 03/07/2026
 """
+import itertools
 import json
+
 import geopandas as gpd
-import pandas as pd
-import networkx as nx
-from shapely import STRtree, Point
 import neatnet
-
-from pyproj import Transformer
-from config import NETWORK_CACHE_FILEPATH, ADDRESSES_DELIMITER, \
-    COMPLETION_DELIMITER, EASTING_COLUMN, NORTHING_COLUMN, LSOA_CODE_COLUMN, \
-    INITIAL_COMPLETION_COLUMN, ONGOING_COMPLETION_COLUMN, \
-    DEFAULT_INITIAL_COMPLETION_RATE, DEFAULT_ONGOING_COMPLETION_RATE
-
+import networkx as nx
+import pandas as pd
+import pyproj
+from config import (
+    ADDRESSES_DELIMITER,
+    COMPLETION_DELIMITER,
+    DEFAULT_INITIAL_COMPLETION_RATE,
+    DEFAULT_ONGOING_COMPLETION_RATE,
+    EASTING_COLUMN,
+    INITIAL_COMPLETION_COLUMN,
+    LSOA_CODE_COLUMN,
+    NETWORK_CACHE_FILEPATH,
+    NORTHING_COLUMN,
+    ONGOING_COMPLETION_COLUMN,
+)
+from shapely import Point, STRtree
 
 # Reusable transformer: British National Grid → WGS84 (required by tile maps).
 # future home: utils.py
-TRANSFORMER_27700_TO_4326 = Transformer.from_crs("EPSG:27700", "EPSG:4326", 
+TRANSFORMER_27700_TO_4326 = pyproj.Transformer.from_crs("EPSG:27700", "EPSG:4326", 
                                                  always_xy=True)
 
 
@@ -120,7 +128,7 @@ def build_graph_from_shapefile(gdf):
         edge_type = row.type
         G.add_edges_from(
             (start, end, {'length': edge_len, 'type': edge_type})
-            for start, end in zip(coords[:-1], coords[1:])
+            for start, end in itertools.pairwise(coords)
         )
     nx.set_node_attributes(G, {node: node for node in G.nodes}, 'pos')
 

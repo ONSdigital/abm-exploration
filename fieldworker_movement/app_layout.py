@@ -1,13 +1,16 @@
 """
 Dash layout and figure builder for the Fieldworker ABM visualisation. Controls
 the web page visualisation of the model.
-
 Aaron Stace, 06/07/2026
 """
 import plotly.graph_objects as go
+from config import (
+    METRIC_METADATA,
+    daily_hh_per_agent,
+    dash_interval_ms,
+    num_field_staff,
+)
 from dash import dcc, html
-
-from config import METRIC_METADATA, dash_interval_ms
 from mapping import to_wgs84
 
 
@@ -30,10 +33,10 @@ def build_initial_figure(model, centre_lon, centre_lat):
     """
     Construct a Plotly figure with three traces:
       - Trace 0: static address dots (true geographic positions).
-      - Trace 1: field staff positions (updated each simulation step).
-      - Trace 2: LSOA choropleth (updated each N steps, coloured by metric).
+      - Trace 2: field staff positions (updated each simulation step).
+      - Trace 3: LSOA choropleth (updated each N steps, coloured by metric).
     """
-    staff_lons, staff_lats = model.get_field_staff_positions()
+    staff_lons, staff_lats, staff_colors = model.get_field_staff_positions()
 
     fig = go.Figure()
 
@@ -42,7 +45,7 @@ def build_initial_figure(model, centre_lon, centre_lat):
         lon=network_lons,
         lat=network_lats,
         mode='lines',
-        line=dict(width=1, color='blue'),
+        line={'width': 1, 'color': 'blue'},
         name='Road/path network',
         hoverinfo='skip',
     ))
@@ -52,21 +55,21 @@ def build_initial_figure(model, centre_lon, centre_lat):
         lon=model.address_lons,
         lat=model.address_lats,
         mode='markers',
-        marker=dict(size=4, color='grey', opacity=0.5),
+        marker={'size': 4, 'color': 'grey', 'opacity': 0.5},
         name='Addresses',
         hoverinfo='skip',
     ))
 
-    # Trace 1 — field staff (updated via Patch each step)
+    # Trace 2 — field staff (updated via Patch each step)
     fig.add_trace(go.Scattermapbox(
         lon=staff_lons,
         lat=staff_lats,
         mode='markers',
-        marker=dict(size=10, color="#0a0001"),
+        marker={'size': 10, 'color': staff_colors},
         name='Field staff',
     ))
 
-    # Trace 2 — LSOA choropleth (updated via Patch every N steps)
+    # Trace 3 — LSOA choropleth (updated via Patch every N steps)
     _initial_meta = METRIC_METADATA['knocks']
     fig.add_trace(go.Choroplethmapbox(
         geojson=model.lsoa_geojson,
@@ -84,27 +87,27 @@ def build_initial_figure(model, centre_lon, centre_lat):
     ))
 
     fig.update_layout(
-        mapbox=dict(
-            style='open-street-map',
-            center=dict(lon=centre_lon, lat=centre_lat),
-            zoom=12,
-        ),
+        mapbox={
+            'style': 'open-street-map',
+            'center': {'lon': centre_lon, 'lat': centre_lat},
+            'zoom': 12,
+        },
         # Keeping uirevision constant prevents the map resetting its zoom/pan
         # position every time the figure is patched.
         uirevision='constant',
-        margin=dict(l=0, r=0, t=0, b=0),
-        legend=dict(
-            bgcolor='rgba(255,255,255,0.7)',
-            x=0.01,
-            y=0.99,
-        ),
+        margin={'l': 0, 'r': 0, 't': 0, 'b': 0},
+        legend={
+            'bgcolor': 'rgba(255,255,255,0.7)',
+            'x': 0.01,
+            'y': 0.99,
+        },
     )
     return fig
 
 
 def create_layout(initial_fig):
     return html.Div([
-        # Controls bar
+        # Controls bar — row 1: buttons, step counter, metric radio
         html.Div([
             html.Button('▶ Play',  id='play-btn',  n_clicks=0,
                         style={'marginRight': '8px'}),
@@ -129,46 +132,126 @@ def create_layout(initial_fig):
                 style={'display': 'inline-block', 'marginLeft': '6px'},
             ),
 
-            # Choropleth update frequency slider
-            html.Span(' |  Update choropleth every',
-                      style={'marginLeft': '24px'}),
-            html.Div(
-                dcc.Slider(
-                    id='choropleth-interval-slider',
-                    min=1, max=50, step=1, value=1,
-                    marks={1: '1', 10: '10', 25: '25', 50: '50'},
-                    tooltip={'placement': 'bottom', 'always_visible': False},
-                ),
-                style={
-                    'display': 'inline-block',
-                    'width': '180px',
-                    'verticalAlign': 'middle',
-                    'marginLeft': '6px',
-                },
-            ),
+            # Settings dropdown — sliders
+            html.Details([
+                html.Summary('⚙ Settings', style={
+                    'cursor': 'pointer',
+                    'marginLeft': '24px',
+                    'fontWeight': 'bold',
+                    'userSelect': 'none',
+                }),
+                html.Div([
+                    # Choropleth update frequency slider
+                    html.Div([
+                        html.Span('Update choropleth every',
+                                  style={'fontWeight': 'bold'}),
+                        dcc.Slider(
+                            id='choropleth-interval-slider',
+                            min=1, max=50, step=1, value=1,
+                            marks={1: '1', 10: '10', 25: '25', 50: '50'},
+                            tooltip={'placement': 'bottom',
+                                     'always_visible': False},
+                        ),
+                        html.Span('steps',
+                                  style={'fontSize': '0.8em',
+                                         'color': '#555'}),
+                    ], style={'width': '220px', 'marginRight': '32px'}),
 
-            # Number of seconds per simulation step slider
-            html.Span(' | Seconds per step', 
-                      style={'marginLeft': '6px'}),
-            html.Div(
-                dcc.Slider(
-                    id='step-duration-slider',
-                    min=1, max=900, step=60, value=60,
-                    marks={1: '1', 300: '300', 600: '600', 900: '900'},
-                    tooltip={'placement': 'bottom', 'always_visible': False},
-                ),
-                style={
-                    'display': 'inline-block',
-                    'width': '180px',
-                    'verticalAlign': 'middle',
-                    'marginLeft': '6px',
-                },
-            ),
+                    html.Div([
+                        html.Span('Steps per tick', 
+                                  style={'fontWeight': 'bold'}),
+                        dcc.Slider(
+                            id='steps-per-tick-slider',
+                            min=1, max=1000, step=5, value=100,
+                            marks={1: '1', 100: '100', 500: '500', 1000: '1000'},
+                            tooltip={'placement': 'bottom', 
+                                     'always_visible': False},
+                        ),
+                        html.Span('(higher = faster, same fidelity)',
+                                style={'fontSize': '0.8em', 'color': '#555'}),
+                    ], style={'width': '220px', 'marginRight': '32px'}),
 
-            html.Span('steps', style={'marginLeft': '4px'}),
+                    # Seconds per simulation step slider
+                    html.Div([
+                        html.Span('Seconds per step',
+                                  style={'fontWeight': 'bold'}),
+                        dcc.Slider(
+                            id='step-duration-slider',
+                            min=1, max=30, step=1, value=1,
+                            marks={1: '1', 15: '15', 30: '30'},
+                            tooltip={'placement': 'bottom',
+                                     'always_visible': False},
+                        ),
+                        html.Span('(higher = loss of fidelity)',
+                                  style={'fontSize': '0.8em', 'color': '#555'}),
+                    ], style={'width': '220px', 'marginRight': '32px'}),
+
+                    # Number of field staff slider
+                    html.Div([
+                        html.Span('Field staff',
+                                  style={'fontWeight': 'bold'}),
+                        dcc.Slider(
+                            id='field-staff-slider',
+                            min=1, max=50, step=1, value=num_field_staff,
+                            marks={1: '1', 10: '10', 25: '25', 50: '50'},
+                            tooltip={'placement': 'bottom',
+                                     'always_visible': False},
+                        ),
+                        html.Span('(applied at start of next day)',
+                                  style={'fontSize': '0.8em',
+                                         'color': '#555'}),
+                    ], style={'width': '220px', 'marginRight': '32px'}),
+
+                    # Daily households-per-agent slider
+                    html.Div([
+                        html.Span('Daily hh per agent',
+                                  style={'fontWeight': 'bold'}),
+                        dcc.Slider(
+                            id='daily-hh-per-agent-slider',
+                            min=1, max=100, step=1, value=daily_hh_per_agent,
+                            marks={1: '1', 20: '20', 40: '40', 60: '60', 80: '80'},
+                            tooltip={'placement': 'bottom',
+                                     'always_visible': False},
+                        ),
+                        html.Span('(applied at start of next day)',
+                                  style={'fontSize': '0.8em',
+                                         'color': '#555'}),
+                    ], style={'width': '220px'}),
+
+                ], style={
+                    'display': 'flex',
+                    'flexDirection': 'row',
+                    'alignItems': 'flex-start',
+                    'padding': '12px 16px',
+                    'background': '#e4e4e4',
+                    'borderTop': '1px solid #ccc',
+                    'marginTop': '4px',
+                }),
+            ], style={'marginLeft': '16px'}),
+
+            html.Details([
+                html.Summary('Daily Interaction Time %', style={
+                    'cursor': 'pointer',
+                    'marginLeft': '24px',
+                    'fontWeight': 'bold',
+                    'userSelect': 'none',
+                }),
+                html.Div(
+                    id='daily-interaction-breakdown',
+                    children='No completed days yet.',
+                    style={
+                        'padding': '12px 16px',
+                        'background': '#e4e4e4',
+                        'borderTop': '1px solid #ccc',
+                        'marginTop': '4px',
+                        'fontFamily': 'monospace',
+                    },
+                ),
+            ], style={'marginLeft': '16px'}),
 
         ], style={'padding': '8px', 'background': '#f0f0f0',
-                  'display': 'flex', 'alignItems': 'center', 'flexWrap': 'wrap'}),
+                  'display': 'flex', 'alignItems': 'center',
+                  'flexWrap': 'wrap'}),
 
         # Map
         dcc.Graph(

@@ -6,8 +6,13 @@ Aaron Stace, 08/06/2026
 """
 import mesa
 import networkx as nx
-
-from config import hh_interaction_mean, hh_interaction_std
+from config import (
+    INTERACTION_COMPLETION_CHANCE,
+    KNOCK_COMPLETION_CHANCE,
+    KNOCK_RESPONSE_CHANCE,
+    hh_interaction_mean,
+    hh_interaction_std,
+)
 
 
 class Household(mesa.Agent):
@@ -15,8 +20,10 @@ class Household(mesa.Agent):
     Household agents, located in the model at the nearest road/path node to 
     their actual geographical location.
     """
-    # Start with one type of household. Maybe have another household class that inherits later on?
-    def __init__(self, model, node, lsoa, response_chance=0.5,
+    # Start with one type of household. Maybe have another household class that 
+    # inherits later on?
+    def __init__(self, model, node, lsoa, 
+                 knock_response_chance=KNOCK_RESPONSE_CHANCE,
                  initial_completion_rate=0.0, ongoing_completion_rate=0.0,
                  survey_completed=False):
 
@@ -26,7 +33,7 @@ class Household(mesa.Agent):
         self.lsoa = lsoa
         model.grid.place_agent(self, node)
 
-        self.response_chance = response_chance
+        self.knock_response_chance = knock_response_chance
         self.initial_completion_rate = initial_completion_rate
         self.ongoing_completion_rate = ongoing_completion_rate
         self.survey_completed = survey_completed
@@ -79,6 +86,45 @@ class FieldWorker(mesa.Agent):
         self.interaction_std = hh_interaction_std
         model.grid.place_agent(self, node)
 
+        # VRP routing state
+        self.assigned_lsoa = None  # LSOA this agent is assigned to for current day
+        self.vrp_waypoints = []  # Ordered list of target household nodes for this agent
+        self.vrp_waypoint_index = 0  # Current position in waypoints list
+        self.daily_assigned_households = []  # Households allocated for today's workload
+        self.households_knocked = set()  # Assigned households already knocked today
+        self.assigned_day = None  # Day when this agent was last assigned (for diagnostics)
+
+    def has_pending_assigned_household_at_node(self, node):
+        """
+        Return True if the node contains at least one assigned household that
+        has not yet been knocked by this agent.
+        """
+        if node is None:
+            return False
+
+        return any(
+            (household.node == node) and (household not in self.households_knocked)
+            for household in self.daily_assigned_households
+        )
+
+    def has_pending_assigned_households(self):
+        """
+        Return True if this agent still has assigned households to knock on.
+        """
+        return any(
+            household not in self.households_knocked
+            for household in self.daily_assigned_households
+        )
+
+    def has_knocked_all_assigned_households(self):
+        """
+        Return True if this agent has knocked all households on today's list.
+        """
+        if not self.daily_assigned_households:
+            return False
+
+        return not self.has_pending_assigned_households()
+
     def clear_route(self):
         """
         Clears an in-progress route and snaps the display position to the
@@ -125,10 +171,32 @@ class FieldWorker(mesa.Agent):
         return any(not household.survey_completed for household in \
                                                         self.model.households)
 
+    def get_next_vrp_target(self):
+        """
+        Advance past any completed waypoints and return the next pending
+        VRP target node for this agent, or None if all waypoints are done.
+
+        Returns
+        -------
+        tuple or None
+            The (easting, northing) coordinates of the next VRP waypoint,
+            or None if no more waypoints.
+        """
+        # Skip over waypoints that no longer have assigned pending households.
+        while self.vrp_waypoint_index < len(self.vrp_waypoints):
+            waypoint_node = self.vrp_waypoints[self.vrp_waypoint_index]
+            if self.has_pending_assigned_household_at_node(waypoint_node):
+                return waypoint_node
+            self.vrp_waypoint_index += 1
+
+        return None
+
     def choose_target_node(self):
         """
-        Choose the next household node to visit using a nearest-node heuristic, 
-        but only among incomplete households.
+        Choose the next household node to visit. Prioritizes today's assigned
+        waypoints, then falls back to nearest incomplete household from the
+        agent's own daily assignment. If the assignment is complete, the agent
+        stops and does not retarget other households.
 
         Returns
         -------
@@ -136,9 +204,33 @@ class FieldWorker(mesa.Agent):
             The (easting, northing) coordinates of the chosen target node, or
             None if all households have completed the Census questionnaire.
         """
-        if self.has_incomplete_household_at_node(self.node):
+        if self.has_pending_assigned_household_at_node(self.node):
             return self.node
 
+        if self.assigned_lsoa:
+            if not self.has_pending_assigned_households():
+                return None
+
+            # Priority 1: next TSP waypoint for today's assigned households.
+            vrp_target = self.get_next_vrp_target()
+            if vrp_target is not None:
+                return vrp_target
+
+            # Priority 2: nearest assigned incomplete household.
+            assigned_incomplete = [
+                household.node for household in self.daily_assigned_households
+                if not household.survey_completed
+            ]
+            if assigned_incomplete:
+                return min(
+                    assigned_incomplete,
+                    key=lambda node: (node[0] - self.node[0]) ** 2 +
+                                     (node[1] - self.node[1]) ** 2,
+                )
+
+            return None
+
+        # Global household finder fallback used for unassigned agents.
         return min(
             (
                 household.node for household in self.model.households
@@ -225,7 +317,7 @@ class FieldWorker(mesa.Agent):
         None
         """
         if self.edge_progress == 0 and \
-                            self.has_incomplete_household_at_node(self.node):
+                self.has_pending_assigned_household_at_node(self.node):
             self.clear_route()
             return
 
@@ -234,7 +326,7 @@ class FieldWorker(mesa.Agent):
             return
 
         if self.edge_progress == 0 and not \
-                    self.has_incomplete_household_at_node(self.target_node):
+            self.has_pending_assigned_household_at_node(self.target_node):
             self.clear_route()
 
         if not self.route_nodes and not self.build_route():
@@ -272,7 +364,7 @@ class FieldWorker(mesa.Agent):
                 self.clear_route()
                 return
 
-            if not self.has_incomplete_household_at_node(self.target_node):
+            if not self.has_pending_assigned_household_at_node(self.target_node):
                 self.clear_route()
                 return
 
@@ -294,9 +386,10 @@ class FieldWorker(mesa.Agent):
             True if someone answers the door, False otherwise.
         """
         self.model.lsoa_stats[household.lsoa]['knocks'] += 1
+        self.households_knocked.add(household)
         # If not in, put in a postcard. Does this prompt a response? Does it 
         # annoy them?
-        return self.random.random() < household.response_chance
+        return self.random.random() < household.knock_response_chance
 
     def interaction(self, household, mu, std):
         """
@@ -330,9 +423,9 @@ class FieldWorker(mesa.Agent):
         for a response, then interacting if someone opens the door.
         """
         candidates = [
-            household for household in self.model.node_to_households.get(
-                                                                self.node, [])
-            if not household.survey_completed
+            household for household in self.daily_assigned_households
+            if household.node == self.node and household not 
+                                                in self.households_knocked
         ]
         if not candidates:
             return
@@ -344,7 +437,21 @@ class FieldWorker(mesa.Agent):
                 self.interaction_mu,
                 self.interaction_std,
             )
-            self.busy_time_remaining_seconds += max(0.0, interaction_length)
+            interaction_seconds = max(0.0, interaction_length)
+            self.busy_time_remaining_seconds += interaction_seconds
+            self.model.current_day_interaction_seconds += interaction_seconds
+            if self.random.random() < INTERACTION_COMPLETION_CHANCE:
+                self.model.register_completion(
+                    household,
+                    characteristic='fieldwork',
+                    step_number=self.model.steps,
+                )
+        elif self.random.random() < KNOCK_COMPLETION_CHANCE:
+            self.model.register_completion(
+                household,
+                characteristic='fieldwork',
+                step_number=self.model.steps,
+            )
 
     def step(self):
         """
