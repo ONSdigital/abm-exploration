@@ -15,16 +15,30 @@ from mapping import to_wgs84
 
 
 def edge_trace_data(graph, edge_type=None):
-    lons = []
-    lats = []
+    start_eastings = []
+    start_northings = []
+    end_eastings = []
+    end_northings = []
 
     for start, end, data in graph.edges(data=True):
         if edge_type is not None and data.get('type') != edge_type:
             continue
-        start_lon, start_lat = to_wgs84([start[0]], [start[1]])
-        end_lon, end_lat = to_wgs84([end[0]], [end[1]])
-        lons.extend([start_lon[0], end_lon[0], None])
-        lats.extend([start_lat[0], end_lat[0], None])
+        start_eastings.append(start[0])
+        start_northings.append(start[1])
+        end_eastings.append(end[0])
+        end_northings.append(end[1])
+
+    if not start_eastings:
+        return [], []
+
+    start_lons, start_lats = to_wgs84(start_eastings, start_northings)
+    end_lons, end_lats = to_wgs84(end_eastings, end_northings)
+
+    lons = []
+    lats = []
+    for i in range(len(start_lons)):
+        lons.extend([start_lons[i], end_lons[i], None])
+        lats.extend([start_lats[i], end_lats[i], None])
 
     return lons, lats
 
@@ -162,8 +176,8 @@ def create_layout(initial_fig):
                                   style={'fontWeight': 'bold'}),
                         dcc.Slider(
                             id='steps-per-tick-slider',
-                            min=1, max=1000, step=5, value=100,
-                            marks={1: '1', 100: '100', 500: '500', 1000: '1000'},
+                            min=1, max=3600, step=50, value=100,
+                            marks={1: '1', 1800: '1800', 3600: '3600'},
                             tooltip={'placement': 'bottom', 
                                      'always_visible': False},
                         ),

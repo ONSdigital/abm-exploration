@@ -5,7 +5,6 @@ import dash
 from app_layout import build_initial_figure
 from config import METRIC_METADATA, daily_hh_per_agent, num_field_staff
 from dash import Input, Output, Patch, State, html, no_update
-from fieldwork_model import FieldWorkModel
 
 
 def _pct(model, lsoa, metric):
@@ -35,6 +34,7 @@ def init_callbacks(app, state):
     Callbacks mutate `state` in place so that all functions share the same
     model instance even after a reset.
     """
+    state.setdefault('last_reset_id', None)
 
     @app.callback(
         Output('run-store', 'data'),
@@ -62,6 +62,10 @@ def init_callbacks(app, state):
 
         triggered = dash.callback_context.triggered_id
 
+        # Ensure reset-triggered figure rebuild is one-shot.
+        if triggered != 'reset-btn':
+            store.pop('reset_id', None)
+
         if triggered == 'play-btn':
             store['running'] = True
         elif triggered == 'pause-btn':
@@ -69,30 +73,20 @@ def init_callbacks(app, state):
         elif triggered == 'reset-btn':
             selected_staff = int(field_staff_value or num_field_staff)
             selected_daily_hh = int(daily_hh_value or daily_hh_per_agent)
-            state['model'] = FieldWorkModel(selected_staff)
-            state['model'].hh_per_agent = selected_daily_hh
+            state['model'].reset(selected_staff, hh_per_agent=selected_daily_hh)
             if step_duration is not None:
                 state['model'].simulation_step_seconds = step_duration
                 state['model'].travel_distance_per_step = (
                     state['model'].walking_speed *
                     state['model'].simulation_step_seconds
                 )
-            state['centre_lon'] = sum(state['model'].address_lons) / len(state['model'].address_lons)
-            state['centre_lat'] = sum(state['model'].address_lats) / len(state['model'].address_lats)
             store['running'] = False
             store['step'] = 0
+            store['reset_id'] = (reset_clicks or 0)
             store['current_field_staff'] = selected_staff
             store['pending_field_staff'] = selected_staff
             store['current_daily_hh_per_agent'] = selected_daily_hh
             store['pending_daily_hh_per_agent'] = selected_daily_hh
-        elif triggered == 'field-staff-slider':
-            store['pending_field_staff'] = int(
-                field_staff_value or store['current_field_staff']
-            )
-        elif triggered == 'daily-hh-per-agent-slider':
-            store['pending_daily_hh_per_agent'] = int(
-                daily_hh_value or store['current_daily_hh_per_agent']
-            )
 
         return store
 
@@ -283,11 +277,15 @@ def init_callbacks(app, state):
 
     @app.callback(
         Output('map', 'figure', allow_duplicate=True),
-        Input('reset-btn', 'n_clicks'),
+        Input('run-store', 'data'),
         prevent_initial_call=True,
     )
-    def reset_figure(_n_clicks):
+    def reset_figure(store):
         """Return a fully rebuilt figure after a reset."""
+        current_reset_id = store.get('reset_id')
+        if current_reset_id is None or current_reset_id == state['last_reset_id']:
+            return no_update
+        state['last_reset_id'] = current_reset_id
         return build_initial_figure(
             state['model'], state['centre_lon'], state['centre_lat']
         )

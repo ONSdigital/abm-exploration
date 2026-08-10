@@ -626,6 +626,75 @@ class FieldWorkModel(mesa.Model):
         self.update_daily_target_lsoas(target_count=target_count)
         self.assign_agents_to_target_lsoas()
 
+    def reset(self, num_field_staff, hh_per_agent=None):
+        """
+        Reset the model to an initial state without reloading geographic data.
+        Reuses the existing graph, addresses, LSOA geometry, and household
+        locations. Re-randomises household completion state, recreates field
+        staff agents, and resets all time and statistics counters.
+
+        Parameters
+        ----------
+        num_field_staff : int
+            Number of field staff agents for the new run.
+        hh_per_agent : int, optional
+            Daily household target per agent. Defaults to the current value.
+        """
+        # Reset time / simulation state
+        self.current_day = 1
+        self.seconds_since_midnight = self.workday_start_seconds
+        self.total_work_seconds = 0
+        self.current_day_interaction_seconds = 0.0
+        self.daily_interaction_time_pct = {}
+        self.daily_target_lsoas = []
+        self._prev_day = 1
+        self.steps = 0
+        self.step_history = []
+
+        if hh_per_agent is not None:
+            self.hh_per_agent = hh_per_agent
+
+        # Refreshing stats for each LSOA
+        self.lsoa_stats = defaultdict(lambda: {
+            'knocks': 0,
+            'interactions': 0,
+            'questionnaire_completions': 0,
+            'initial_questionnaire_completions': 0,
+            'ongoing_questionnaire_completions': 0,
+            'fieldwork_questionnaire_completions': 0,
+            'remaining_households': 0,
+            'total_households': 0,
+        })
+
+        # Re-randomise each household's survey completion state
+        for household in self.households:
+            completion_rates = self.get_lsoa_completion_rates(household.lsoa)
+            survey_completed = (
+                self.random.random() < completion_rates[INITIAL_COMPLETION_COLUMN]
+            )
+            household.survey_completed = survey_completed
+            household.completion_step = 0 if survey_completed else None
+            household.completion_source = 'initial' if survey_completed else None
+            self.lsoa_stats[household.lsoa]['total_households'] += 1
+            self.lsoa_stats[household.lsoa]['remaining_households'] += 1
+            if survey_completed:
+                self.register_completion(
+                    household, characteristic='initial', step_number=0
+                )
+
+        # Remove existing field staff and recreate
+        for agent in list(self.field_staff):
+            self.grid.remove_agent(agent)
+            agent.remove()
+
+        self.field_staff = FieldWorker.create_agents(
+            model=self,
+            n=num_field_staff,
+            node=[self.random.choice(self.node_list) for _ in range(num_field_staff)]
+        )
+        self.update_daily_target_lsoas()
+        self.assign_agents_to_target_lsoas()
+
     def step(self):
         """
         One step of the model.
