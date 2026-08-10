@@ -11,3 +11,5 @@
 - When adding or removing code in a file, always give me the option to accept
   or reject the change before you make it.
 - Do not apply any edits to code without explicitly asking me to proceed first.
+- Do not simply agree with me when I say something. Answer critically if 
+  you think I am wrong or if you think there is a better way to do something.
