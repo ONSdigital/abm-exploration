@@ -230,22 +230,34 @@ def init_callbacks(app, state):
         )
 
     @app.callback(
-        Output('daily-interaction-breakdown', 'children'),
+        Output('daily-metric-breakdown', 'children'),
         Input('interval', 'n_intervals'),
         Input('reset-btn', 'n_clicks'),
+        Input('daily-metric-radio', 'value'),
     )
-    def update_daily_interaction_breakdown(_n_intervals, _reset_clicks):
+    def update_daily_metric_breakdown(_n_intervals, _reset_clicks, metric_type):
         """
-        Render finalized end-of-day interaction-time percentages.
+        Render finalized end-of-day daily metrics.
         """
-        day_pct = state['model'].daily_interaction_time_pct
-        if not day_pct:
+        metric_type = metric_type or 'interaction_time_pct'
+        model = state['model']
+
+        if metric_type == 'daily_knocks':
+            data = model.daily_knocks_by_day
+            formatter = lambda value: f'{int(value)} knocks'
+        elif metric_type == 'daily_interactions':
+            data = model.daily_interactions_by_day
+            formatter = lambda value: f'{int(value)} interactions'
+        else:
+            data = model.daily_interaction_time_pct
+            formatter = lambda value: f'{round(value)}%'
+
+        if not data:
             return 'No completed days yet.'
 
         lines = []
-        for day in sorted(day_pct):
-            pct_value = round(day_pct[day])
-            lines.append(html.Div(f'Day {day}: {pct_value}%'))
+        for day in sorted(data):
+            lines.append(html.Div(f'Day {day}: {formatter(data[day])}'))
         return lines
 
     @app.callback(
