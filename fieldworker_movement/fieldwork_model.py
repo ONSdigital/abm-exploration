@@ -66,6 +66,10 @@ class FieldWorkModel(mesa.Model):
         self.total_work_seconds = 0
         self.current_day_interaction_seconds = 0.0
         self.daily_interaction_time_pct = {}
+        self.daily_knocks_by_day = {}
+        self.daily_interactions_by_day = {}
+        self.prev_day_lsoa_knocks_snapshot = {}
+        self.prev_day_lsoa_interactions_snapshot = {}
         self.daily_target_lsoas = []
         self._prev_day = 1  # Track day boundaries for routing trigger
         self.shortest_path_cache = {}  # Cache for road-network distances: 
@@ -125,6 +129,14 @@ class FieldWorkModel(mesa.Model):
         self.lsoa_to_households = defaultdict(list)
         for household in self.households:
             self.lsoa_to_households[household.lsoa].append(household)
+
+        # Baseline cumulative-contact snapshots used to derive end-of-day totals.
+        self.prev_day_lsoa_knocks_snapshot = {
+            lsoa: 0 for lsoa in self.lsoa_stats
+        }
+        self.prev_day_lsoa_interactions_snapshot = {
+            lsoa: 0 for lsoa in self.lsoa_stats
+        }
 
         # One entry per step: {'step': N, 'lsoa_stats': {lsoa: {knocks, interactions}}}
         self.step_history = []
@@ -646,6 +658,10 @@ class FieldWorkModel(mesa.Model):
         self.total_work_seconds = 0
         self.current_day_interaction_seconds = 0.0
         self.daily_interaction_time_pct = {}
+        self.daily_knocks_by_day = {}
+        self.daily_interactions_by_day = {}
+        self.prev_day_lsoa_knocks_snapshot = {}
+        self.prev_day_lsoa_interactions_snapshot = {}
         self.daily_target_lsoas = []
         self._prev_day = 1
         self.steps = 0
@@ -681,6 +697,13 @@ class FieldWorkModel(mesa.Model):
                 self.register_completion(
                     household, characteristic='initial', step_number=0
                 )
+
+        self.prev_day_lsoa_knocks_snapshot = {
+            lsoa: 0 for lsoa in self.lsoa_stats
+        }
+        self.prev_day_lsoa_interactions_snapshot = {
+            lsoa: 0 for lsoa in self.lsoa_stats
+        }
 
         # Remove existing field staff and recreate
         for agent in list(self.field_staff):
@@ -725,6 +748,35 @@ class FieldWorkModel(mesa.Model):
                 100.0,
                 max(0.0, day_pct),
             )
+
+            daily_total_knocks = 0
+            daily_total_interactions = 0
+            for lsoa, stats in self.lsoa_stats.items():
+                prev_knocks = self.prev_day_lsoa_knocks_snapshot.get(lsoa, 0)
+                prev_interactions = self.prev_day_lsoa_interactions_snapshot.get(
+                    lsoa,
+                    0,
+                )
+                daily_total_knocks += stats['knocks'] - prev_knocks
+                daily_total_interactions += (
+                    stats['interactions'] - prev_interactions
+                )
+
+            self.daily_knocks_by_day[completed_day] = max(0, daily_total_knocks)
+            self.daily_interactions_by_day[completed_day] = max(
+                0,
+                daily_total_interactions,
+            )
+
+            self.prev_day_lsoa_knocks_snapshot = {
+                lsoa: stats['knocks']
+                for lsoa, stats in self.lsoa_stats.items()
+            }
+            self.prev_day_lsoa_interactions_snapshot = {
+                lsoa: stats['interactions']
+                for lsoa, stats in self.lsoa_stats.items()
+            }
+
             self.current_day_interaction_seconds = 0.0
 
             self.update_daily_target_lsoas()
