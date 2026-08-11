@@ -5,7 +5,6 @@ visiting households.
 Aaron Stace, 08/06/2026
 """
 import mesa
-import networkx as nx
 from config import (
     INTERACTION_COMPLETION_CHANCE,
     KNOCK_COMPLETION_CHANCE,
@@ -92,6 +91,8 @@ class FieldWorker(mesa.Agent):
         self.vrp_waypoint_index = 0  # Current position in waypoints list
         self.daily_assigned_households = []  # Households allocated for today's workload
         self.households_knocked = set()  # Assigned households already knocked today
+        self.pending_assigned_households = set()  # Assigned households not yet knocked (O(1) lookup)
+        self.node_to_pending_assigned = {}  # node -> set[Household] for pending households
         self.assigned_day = None  # Day when this agent was last assigned (for diagnostics)
 
     def has_pending_assigned_household_at_node(self, node):
@@ -102,19 +103,13 @@ class FieldWorker(mesa.Agent):
         if node is None:
             return False
 
-        return any(
-            (household.node == node) and (household not in self.households_knocked)
-            for household in self.daily_assigned_households
-        )
+        return bool(self.node_to_pending_assigned.get(node))
 
     def has_pending_assigned_households(self):
         """
         Return True if this agent still has assigned households to knock on.
         """
-        return any(
-            household not in self.households_knocked
-            for household in self.daily_assigned_households
-        )
+        return bool(self.pending_assigned_households)
 
     def has_knocked_all_assigned_households(self):
         """
@@ -265,14 +260,8 @@ class FieldWorker(mesa.Agent):
             self.display_position = self.node
             return True
 
-        try:
-            self.route_nodes = nx.shortest_path(
-                self.model.graph,
-                self.node,
-                target_node,
-                weight='length',
-            )
-        except (nx.NetworkXNoPath, nx.NodeNotFound):
+        self.route_nodes = self.model.get_road_path(self.node, target_node)
+        if not self.route_nodes:
             self.clear_route()
             return False
 
@@ -387,6 +376,8 @@ class FieldWorker(mesa.Agent):
         """
         self.model.lsoa_stats[household.lsoa]['knocks'] += 1
         self.households_knocked.add(household)
+        self.pending_assigned_households.discard(household)
+        self.node_to_pending_assigned.get(household.node, set()).discard(household)
         # If not in, put in a postcard. Does this prompt a response? Does it 
         # annoy them?
         return self.random.random() < household.knock_response_chance

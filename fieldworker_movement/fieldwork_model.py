@@ -71,6 +71,10 @@ class FieldWorkModel(mesa.Model):
         self._prev_day = 1  # Track day boundaries for routing trigger
         self.shortest_path_cache = {}  # Cache for road-network distances: 
                                        # (node_a, node_b) -> length
+        self.shortest_path_nodes_cache = {}  # Cache for road-network paths:
+                                             # (node_a, node_b) -> [node, ...]
+        self._incomplete_nodes_cache = {}  # Cache for incomplete nodes per LSOA:
+                                           # lsoa_code -> [node, ...]
 
         gdf = load_network_data(ROADS_FILEPATH, PATHS_FILEPATH)
         G = build_graph_from_shapefile(gdf)
@@ -229,6 +233,7 @@ class FieldWorkModel(mesa.Model):
         stats['questionnaire_completions'] += 1
         stats[f'{characteristic}_questionnaire_completions'] += 1
         stats['remaining_households'] -= 1
+        self._incomplete_nodes_cache.pop(household.lsoa, None)
         return True
 
     def advance_electronic_completions(self):
@@ -312,12 +317,17 @@ class FieldWorkModel(mesa.Model):
         list[tuple]
             Unique (easting, northing) nodes with incomplete households.
         """
+        if lsoa_code in self._incomplete_nodes_cache:
+            return self._incomplete_nodes_cache[lsoa_code]
+
         nodes = []
         seen = set()
         for household in self.lsoa_to_households.get(lsoa_code, []):
             if not household.survey_completed and household.node not in seen:
                 nodes.append(household.node)
                 seen.add(household.node)
+
+        self._incomplete_nodes_cache[lsoa_code] = nodes
         return nodes
 
     def get_road_distance(self, node_a, node_b):
@@ -352,6 +362,44 @@ class FieldWorkModel(mesa.Model):
 
         self.shortest_path_cache[key] = dist
         return dist
+
+    def get_road_path(self, node_a, node_b):
+        """
+        Get the road-network shortest-path node sequence between two nodes.
+        Uses a cache to avoid recomputing the same pair.
+
+        Parameters
+        ----------
+        node_a, node_b : tuple
+            (easting, northing) coordinate tuples.
+
+        Returns
+        -------
+        list[tuple]
+            Ordered node sequence from node_a to node_b, or [] if no path
+            exists.
+        """
+        key = (node_a, node_b)
+        if key in self.shortest_path_nodes_cache:
+            return self.shortest_path_nodes_cache[key]
+
+        # Check reversed direction to avoid running Dijkstra twice for A→B
+        # and B→A.
+        reverse_key = (node_b, node_a)
+        if reverse_key in self.shortest_path_nodes_cache:
+            path = list(reversed(self.shortest_path_nodes_cache[reverse_key]))
+            self.shortest_path_nodes_cache[key] = path
+            return path
+
+        try:
+            path = nx.shortest_path(
+                self.graph, node_a, node_b, weight='length'
+            )
+        except (nx.NetworkXNoPath, nx.NodeNotFound):
+            path = []
+
+        self.shortest_path_nodes_cache[key] = path
+        return path
 
     def get_incomplete_households_for_lsoa(self, lsoa_code):
         """
@@ -459,6 +507,8 @@ class FieldWorkModel(mesa.Model):
             agent.clear_route()
             agent.vrp_waypoint_index = 0
             agent.households_knocked = set()
+            agent.pending_assigned_households = set()
+            agent.node_to_pending_assigned = {}
 
         ordered_agents = list(agents)
         start_index = (self.current_day - 1) % len(ordered_agents)
@@ -497,6 +547,10 @@ class FieldWorkModel(mesa.Model):
         for agent in agents:
             assigned_households = assigned_by_agent.get(agent, [])
             agent.daily_assigned_households = assigned_households
+            agent.pending_assigned_households = set(assigned_households)
+            agent.node_to_pending_assigned = {}
+            for hh in assigned_households:
+                agent.node_to_pending_assigned.setdefault(hh.node, set()).add(hh)
             target_nodes = [household.node for household in assigned_households]
             agent.vrp_waypoints = self._build_open_tsp_route(agent.node, target_nodes)
 
@@ -538,6 +592,8 @@ class FieldWorkModel(mesa.Model):
                 agent.vrp_waypoint_index = 0
                 agent.daily_assigned_households = []
                 agent.households_knocked = set()
+                agent.pending_assigned_households = set()
+                agent.node_to_pending_assigned = {}
                 agent.vrp_waypoints = []
             return {}
 
@@ -582,6 +638,8 @@ class FieldWorkModel(mesa.Model):
                 agent.vrp_waypoint_index = 0
                 agent.daily_assigned_households = []
                 agent.households_knocked = set()
+                agent.pending_assigned_households = set()
+                agent.node_to_pending_assigned = {}
                 agent.vrp_waypoints = []
 
         # Start each day from a fresh random incomplete node for every assigned
@@ -653,6 +711,7 @@ class FieldWorkModel(mesa.Model):
         self._prev_day = 1
         self.steps = 0
         self.step_history = []
+        self._incomplete_nodes_cache = {}
 
         if hh_per_agent is not None:
             self.hh_per_agent = hh_per_agent
