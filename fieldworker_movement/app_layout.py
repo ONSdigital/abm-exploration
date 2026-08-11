@@ -43,7 +43,7 @@ def edge_trace_data(graph, edge_type=None):
     return lons, lats
 
 
-def build_initial_figure(model, centre_lon, centre_lat):
+def build_initial_figure(model, centre_lon, centre_lat, viz_data):
     """
     Construct a Plotly figure with three traces:
       - Trace 0: static address dots (true geographic positions).
@@ -66,8 +66,8 @@ def build_initial_figure(model, centre_lon, centre_lat):
 
     # Trace 0 — address dots (static background layer)
     fig.add_trace(go.Scattermapbox(
-        lon=model.address_lons,
-        lat=model.address_lats,
+        lon=viz_data['address_lons'],
+        lat=viz_data['address_lats'],
         mode='markers',
         marker={'size': 4, 'color': 'grey', 'opacity': 0.5},
         name='Addresses',
@@ -86,10 +86,10 @@ def build_initial_figure(model, centre_lon, centre_lat):
     # Trace 3 — LSOA choropleth (updated via Patch every N steps)
     _initial_meta = METRIC_METADATA['knocks']
     fig.add_trace(go.Choroplethmapbox(
-        geojson=model.lsoa_geojson,
-        locations=model.lsoa_ids,
-        customdata=model.lsoa_names,
-        z=[0] * len(model.lsoa_ids),
+        geojson=viz_data['lsoa_geojson'],
+        locations=viz_data['lsoa_ids'],
+        customdata=viz_data['lsoa_names'],
+        z=[0] * len(viz_data['lsoa_ids']),
         colorscale=_initial_meta['colorscale'],
         zmin=0,
         zmax=100,

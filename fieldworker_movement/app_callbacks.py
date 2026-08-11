@@ -22,7 +22,7 @@ def _pct(model, lsoa, metric):
     return model.lsoa_stats[lsoa][metric] / total * 100
 
 
-def init_callbacks(app, state):
+def init_callbacks(app, state, viz_data):
     """
     Registers all Dash callbacks.
 
@@ -191,7 +191,7 @@ def init_callbacks(app, state):
         if store['step'] % interval == 0:
             meta = METRIC_METADATA.get(metric, METRIC_METADATA['knocks'])
             patched_fig['data'][3]['z'] = [
-                _pct(model, lsoa, metric) for lsoa in model.lsoa_ids
+                _pct(model, lsoa, metric) for lsoa in viz_data['lsoa_ids']
             ]
             patched_fig['data'][3]['name'] = meta['label']
             patched_fig['data'][3]['colorscale'] = meta['colorscale']
@@ -279,7 +279,7 @@ def init_callbacks(app, state):
         meta = METRIC_METADATA.get(metric, METRIC_METADATA['knocks'])
         patched_fig = Patch()
         patched_fig['data'][3]['z'] = [
-            _pct(model, lsoa, metric) for lsoa in model.lsoa_ids
+            _pct(model, lsoa, metric) for lsoa in viz_data['lsoa_ids']
         ]
         patched_fig['data'][3]['name'] = meta['label']
         patched_fig['data'][3]['colorscale'] = meta['colorscale']
@@ -299,5 +299,5 @@ def init_callbacks(app, state):
             return no_update
         state['last_reset_id'] = current_reset_id
         return build_initial_figure(
-            state['model'], state['centre_lon'], state['centre_lat']
+            state['model'], state['centre_lon'], state['centre_lat'], viz_data
         )

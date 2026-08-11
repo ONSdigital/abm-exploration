@@ -16,9 +16,7 @@ from config import (
     DEFAULT_ONGOING_COMPLETION_RATE,
     INITIAL_COMPLETION_COLUMN,
     KNOCK_RESPONSE_CHANCE,
-    LSOA_CODE_COLUMN,
     LSOA_COMPLETION_FILEPATH,
-    LSOAS_FILEPATH,
     ONGOING_COMPLETION_COLUMN,
     PATHS_FILEPATH,
     ROADS_FILEPATH,
@@ -33,7 +31,6 @@ from mapping import (
     connect_components,
     load_addresses,
     load_lsoa_completion_rates,
-    load_lsoa_geojson,
     load_network_data,
     snap_addresses_to_nodes,
     to_wgs84,
@@ -79,6 +76,7 @@ class FieldWorkModel(mesa.Model):
         G = build_graph_from_shapefile(gdf)
         G = connect_components(G)
         gdf_addresses = load_addresses(ADDRESSES_FILEPATH)
+        self.gdf_addresses = gdf_addresses
         self.lsoa_completion_rates = load_lsoa_completion_rates(
             LSOA_COMPLETION_FILEPATH
         )
@@ -140,17 +138,6 @@ class FieldWorkModel(mesa.Model):
 
         # One entry per step: {'step': N, 'lsoa_stats': {lsoa: {knocks, interactions}}}
         self.step_history = []
-
-        # Storing display-only true geographic positions of addresses (WGS84) 
-        # for the visualisation background layer.
-        self.address_lons, self.address_lats = to_wgs84(
-            gdf_addresses.geometry.x, gdf_addresses.geometry.y
-        )
-
-        # LSOA polygon geometry for the live choropleth layer.
-        self.lsoa_geojson, self.lsoa_ids, self.lsoa_names = load_lsoa_geojson(
-            LSOAS_FILEPATH, LSOA_CODE_COLUMN
-        )
 
         self.field_staff = FieldWorker.create_agents(
             model=self,
