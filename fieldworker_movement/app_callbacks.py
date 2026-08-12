@@ -16,10 +16,11 @@ def _pct(model, lsoa, metric):
     float
         Percentage of households in the LSOA that have completed the metric.
     """
-    total = model.lsoa_stats[lsoa]['total_households']
+    stats = model.lsoa_stats[lsoa]
+    total = stats['total_households']
     if total == 0:
         return 0
-    return model.lsoa_stats[lsoa][metric] / total * 100
+    return stats[metric] / total * 100
 
 
 def init_callbacks(app, state, viz_data):
@@ -36,13 +37,25 @@ def init_callbacks(app, state, viz_data):
     """
     state.setdefault('last_reset_id', None)
 
+    _last_breakdown_state = [None]
+
+    def _apply_choropleth(patched_fig, model, metric):
+        meta = METRIC_METADATA.get(metric, METRIC_METADATA['knocks'])
+        patched_fig['data'][3]['z'] = [
+            _pct(model, lsoa, metric) for lsoa in viz_data['lsoa_ids']
+        ]
+        patched_fig['data'][3]['name'] = meta['label']
+        patched_fig['data'][3]['colorscale'] = meta['colorscale']
+        patched_fig['data'][3]['zmin'] = 0
+        patched_fig['data'][3]['zmax'] = 100
+
     @app.callback(
         Output('run-store', 'data'),
         Input('play-btn',  'n_clicks'),
         Input('pause-btn', 'n_clicks'),
         Input('reset-btn', 'n_clicks'),
-        Input('field-staff-slider', 'value'),
-        Input('daily-hh-per-agent-slider', 'value'),
+        State('field-staff-slider', 'value'),
+        State('daily-hh-per-agent-slider', 'value'),
         State('run-store', 'data'),
         State('step-duration-slider', 'value'),
         prevent_initial_call=True,
@@ -111,14 +124,13 @@ def init_callbacks(app, state, viz_data):
         Output('run-store', 'data', allow_duplicate=True),
         Input('interval', 'n_intervals'),
         State('run-store', 'data'),
-        State('reset-btn', 'n_clicks'),
         State('metric-store', 'data'),
         State('choropleth-interval-slider', 'value'),
         State('step-duration-slider', 'value'),
         State('steps-per-tick-slider', 'value'),
         prevent_initial_call=True,
     )
-    def tick(n_intervals, store, _reset_clicks, metric, choropleth_interval, 
+    def tick(n_intervals, store, metric, choropleth_interval,
              step_duration, steps_per_tick):
         """
         Advance the simulation by one step and patch:
@@ -170,8 +182,6 @@ def init_callbacks(app, state, viz_data):
                     model.update_daily_target_lsoas()
                     model.assign_agents_to_target_lsoas()
 
-                store['current_field_staff'] = len(model.field_staff)
-                store['current_daily_hh_per_agent'] = model.hh_per_agent
 
         store['step'] = model.steps
 
@@ -189,39 +199,11 @@ def init_callbacks(app, state, viz_data):
         interval = choropleth_interval or 1
         metric = metric or 'knocks'
         if store['step'] % interval == 0:
-            meta = METRIC_METADATA.get(metric, METRIC_METADATA['knocks'])
-            patched_fig['data'][3]['z'] = [
-                _pct(model, lsoa, metric) for lsoa in viz_data['lsoa_ids']
-            ]
-            patched_fig['data'][3]['name'] = meta['label']
-            patched_fig['data'][3]['colorscale'] = meta['colorscale']
-            patched_fig['data'][3]['zmin'] = 0
-            patched_fig['data'][3]['zmax'] = 100
+            _apply_choropleth(patched_fig, model, metric)
 
         current_staff = int(store['current_field_staff'])
-        pending_staff = int(store.get('pending_field_staff', current_staff))
-        current_daily_hh = int(store.get('current_daily_hh_per_agent',
-                                         model.hh_per_agent))
-        pending_daily_hh = int(store.get('pending_daily_hh_per_agent',
-                                         current_daily_hh))
-
-        suffix_parts = []
-        if pending_staff != current_staff:
-            suffix_parts.append(
-                f'Staff: {current_staff} (pending {pending_staff} next day)'
-            )
-        else:
-            suffix_parts.append(f'Staff: {current_staff}')
-
-        if pending_daily_hh != current_daily_hh:
-            suffix_parts.append(
-                f'Daily hh/agent: {current_daily_hh} '
-                f'(pending {pending_daily_hh} next day)'
-            )
-        else:
-            suffix_parts.append(f'Daily hh/agent: {current_daily_hh}')
-
-        status_suffix = ' | ' + ' | '.join(suffix_parts)
+        current_daily_hh = int(store['current_daily_hh_per_agent'])
+        status_suffix = f' | Staff: {current_staff} | Daily hh/agent: {current_daily_hh}'
 
         return (
             patched_fig,
@@ -252,6 +234,12 @@ def init_callbacks(app, state, viz_data):
             data = model.daily_interaction_time_pct
             formatter = lambda value: f'{round(value)}%'
 
+        current_state = (metric_type, model.current_day, len(data))
+        if (dash.callback_context.triggered_id != 'reset-btn'
+                and current_state == _last_breakdown_state[0]):
+            return no_update
+        _last_breakdown_state[0] = current_state
+
         if not data:
             return 'No completed days yet.'
 
@@ -276,15 +264,8 @@ def init_callbacks(app, state, viz_data):
 
         metric = metric or 'knocks'
         model = state['model']
-        meta = METRIC_METADATA.get(metric, METRIC_METADATA['knocks'])
         patched_fig = Patch()
-        patched_fig['data'][3]['z'] = [
-            _pct(model, lsoa, metric) for lsoa in viz_data['lsoa_ids']
-        ]
-        patched_fig['data'][3]['name'] = meta['label']
-        patched_fig['data'][3]['colorscale'] = meta['colorscale']
-        patched_fig['data'][3]['zmin'] = 0
-        patched_fig['data'][3]['zmax'] = 100
+        _apply_choropleth(patched_fig, model, metric)
         return patched_fig
 
     @app.callback(
