@@ -14,39 +14,37 @@ from dash import dcc, html
 from mapping import to_wgs84
 
 
-def edge_trace_data(graph, edge_type=None):
-    start_eastings = []
-    start_northings = []
-    end_eastings = []
-    end_northings = []
+def edge_trace_data(graph):
+    filtered = [
+        (s[0], s[1], e[0], e[1])
+        for s, e, _ in graph.edges(data=True)
+    ]
 
-    for start, end, data in graph.edges(data=True):
-        if edge_type is not None and data.get('type') != edge_type:
-            continue
-        start_eastings.append(start[0])
-        start_northings.append(start[1])
-        end_eastings.append(end[0])
-        end_northings.append(end[1])
-
-    if not start_eastings:
+    if not filtered:
         return [], []
 
-    start_lons, start_lats = to_wgs84(start_eastings, start_northings)
-    end_lons, end_lats = to_wgs84(end_eastings, end_northings)
+    start_eastings, start_northings, end_eastings, \
+        end_northings = zip(*filtered)
 
-    lons = []
-    lats = []
-    for i in range(len(start_lons)):
-        lons.extend([start_lons[i], end_lons[i], None])
-        lats.extend([start_lats[i], end_lats[i], None])
+    n = len(filtered)
+    all_lons, all_lats = to_wgs84(
+        start_eastings + end_eastings,
+        start_northings + end_northings,
+    )
+    start_lons, end_lons = all_lons[:n], all_lons[n:]
+    start_lats, end_lats = all_lats[:n], all_lats[n:]
+
+    lons = [c for i in range(n) for c in (start_lons[i], end_lons[i], None)]
+    lats = [c for i in range(n) for c in (start_lats[i], end_lats[i], None)]
 
     return lons, lats
 
 
 def build_initial_figure(model, centre_lon, centre_lat, viz_data):
     """
-    Construct a Plotly figure with three traces:
-      - Trace 0: static address dots (true geographic positions).
+    Construct a Plotly figure with four traces:
+      - Trace 0: road/path network (static).
+      - Trace 1: address dots (static background layer).
       - Trace 2: field staff positions (updated each simulation step).
       - Trace 3: LSOA choropleth (updated each N steps, coloured by metric).
     """
