@@ -6,9 +6,11 @@ Aaron Stace, 03/07/2026
 """
 import itertools
 import json
+import math
+import os
+import time
 
 import geopandas as gpd
-import neatnet
 import networkx as nx
 import pandas as pd
 import pyproj
@@ -28,8 +30,9 @@ from shapely import Point, STRtree
 
 # Reusable transformer: British National Grid → WGS84 (required by tile maps).
 # future home: utils.py
-TRANSFORMER_27700_TO_4326 = pyproj.Transformer.from_crs("EPSG:27700", "EPSG:4326", 
-                                                 always_xy=True)
+TRANSFORMER_27700_TO_4326 = pyproj.Transformer.from_crs("EPSG:27700", 
+                                                        "EPSG:4326", 
+                                                        always_xy=True)
 
 
 def load_network_data(roads_file, paths_file, tolerance=1.0, cache_file=None):
@@ -59,9 +62,6 @@ def load_network_data(roads_file, paths_file, tolerance=1.0, cache_file=None):
     gdf : GeoDataFrame
         A GeoDataFrame containing the combined road and path data with a geometry column.
     """
-    import os
-    import time
-
     if cache_file is None:
         cache_file = NETWORK_CACHE_FILEPATH
 
@@ -95,6 +95,7 @@ def load_network_data(roads_file, paths_file, tolerance=1.0, cache_file=None):
     # NOTE: close_gaps is the slowest step — it inspects every endpoint against
     # every nearby geometry. For a city-scale network this can take 1-5 minutes.
     print("  Running neatnet.close_gaps (this is the slow step — please wait)...")
+    import neatnet
     t2 = time.time()
     gdf = neatnet.close_gaps(gdf, tolerance=tolerance)
     print(f"  close_gaps done ({time.time() - t2:.1f}s)")
@@ -124,10 +125,12 @@ def build_graph_from_shapefile(gdf):
 
     for row in gdf.itertuples(index=False):
         coords = list(row.geometry.coords)
-        edge_len = row.geometry.length
         edge_type = row.type
         G.add_edges_from(
-            (start, end, {'length': edge_len, 'type': edge_type})
+            (start, end, {
+                'length': math.hypot(end[0] - start[0], end[1] - start[1]),
+                'type': edge_type,
+            })
             for start, end in itertools.pairwise(coords)
         )
     nx.set_node_attributes(G, {node: node for node in G.nodes}, 'pos')
@@ -325,7 +328,7 @@ def to_wgs84(eastings, northings):
     lons, lats : tuple of lists
     """
     # future home: utils.py
-    lons, lats = TRANSFORMER_27700_TO_4326.transform(list(eastings), list(northings))
+    lons, lats = TRANSFORMER_27700_TO_4326.transform(eastings, northings)
     return lons, lats
 
 
@@ -366,9 +369,11 @@ def load_lsoa_geojson(lsoa_filepath, lsoa_code_column):
 
     # Choroplethmapbox requires feature['id'] at the top level (not just inside
     # properties) to match against the 'locations' array.
+    lsoa_ids = []
+    lsoa_names = []
     for feature in geojson['features']:
-        feature['id'] = feature['properties']['lsoa_code']
-
-    lsoa_ids = [f['id'] for f in geojson['features']]
-    lsoa_names = [f['properties']['lsoa_name'] for f in geojson['features']]
+        lsoa_code = feature['properties']['lsoa_code']
+        feature['id'] = lsoa_code
+        lsoa_ids.append(lsoa_code)
+        lsoa_names.append(feature['properties']['lsoa_name'])
     return geojson, lsoa_ids, lsoa_names
