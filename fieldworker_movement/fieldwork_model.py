@@ -59,8 +59,6 @@ class FieldWorkModel(mesa.Model):
         self.workday_start_seconds = self.workday_start_hour * 60 * 60
         self.workday_duration_seconds = self.workday_duration_hours * 60 * 60
         self._reset_run_counters()
-        self.shortest_path_cache = {}  # Cache for road-network distances: 
-                                       # (node_a, node_b) -> length
         self.shortest_path_nodes_cache = {}  # Cache for road-network paths:
                                              # (node_a, node_b) -> [node, ...]
 
@@ -332,39 +330,6 @@ class FieldWorkModel(mesa.Model):
         self._incomplete_nodes_cache[lsoa_code] = nodes
         return nodes
 
-    def get_road_distance(self, node_a, node_b):
-        """
-        Get the road-network shortest-path distance between two nodes.
-        Uses a cache to avoid recomputing the same pair.
-
-        Parameters
-        ----------
-        node_a, node_b : tuple
-            (easting, northing) coordinate tuples.
-
-        Returns
-        -------
-        float
-            The shortest-path length in metres, or float('inf') if no path exists.
-        """
-        # Normalize key to avoid (A, B) and (B, A) as separate entries
-        key = (node_a, node_b) if node_a <= node_b else (node_b, node_a)
-        if key in self.shortest_path_cache:
-            return self.shortest_path_cache[key]
-
-        try:
-            dist = nx.shortest_path_length(
-                self.graph,
-                node_a,
-                node_b,
-                weight='length'
-            )
-        except (nx.NetworkXNoPath, nx.NodeNotFound):
-            dist = float('inf')
-
-        self.shortest_path_cache[key] = dist
-        return dist
-
     def get_road_path(self, node_a, node_b):
         """
         Get the road-network shortest-path node sequence between two nodes.
@@ -424,13 +389,19 @@ class FieldWorkModel(mesa.Model):
 
     def _build_open_tsp_route(self, start_node, stop_nodes):
         """
-        Build an exact minimum-distance open TSP route from a start node
-        through all stop nodes along the road network.
+        Build a circular-ish route through all stop nodes using angle sort
+        followed by a 2-opt improvement pass.
+
+        Stops are first sorted by polar angle around their centroid, giving a
+        loop-shaped starting tour.
+        A single 2-opt pass then removes any crossing edges introduced by the
+        angle sort (e.g. two stops at similar angles but different radii). All 
+        distance calculations use Euclidean distance.
 
         Parameters
         ----------
         start_node : tuple
-            Start node for the route.
+            (easting, northing) of the agent's current position.
         stop_nodes : list[tuple]
             Nodes that must be visited.
 
@@ -442,58 +413,55 @@ class FieldWorkModel(mesa.Model):
         unique_stops = list(dict.fromkeys(stop_nodes))
         if not unique_stops:
             return []
-
         if len(unique_stops) == 1:
             return unique_stops
 
-        n = len(unique_stops)
-        start_to_stop = [
-            self.get_road_distance(start_node, unique_stops[j])
-            for j in range(n)
-        ]
-        stop_to_stop = [
-            [self.get_road_distance(unique_stops[i], 
-                                    unique_stops[j]) for j in range(n)]
-            for i in range(n)
-        ]
+        def euclid2(a, b):
+            return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2
 
-        inf = float('inf')
-        dp = [[inf] * n for _ in range(1 << n)]
-        parent = [[None] * n for _ in range(1 << n)]
+        # Step 1 — angle sort around centroid.
+        cx = sum(s[0] for s in unique_stops) / len(unique_stops)
+        cy = sum(s[1] for s in unique_stops) / len(unique_stops)
+        sorted_stops = sorted(
+            unique_stops,
+            key=lambda s: math.atan2(s[1] - cy, s[0] - cx)
+        )
 
-        for j in range(n):
-            dp[1 << j][j] = start_to_stop[j]
+        # Step 2 — rotate ring so the entry point is nearest to start_node.
+        start_angle = math.atan2(
+            start_node[1] - cy, start_node[0] - cx
+        )
 
-        for mask in range(1 << n):
-            for last in range(n):
-                cost = dp[mask][last]
-                if cost == inf or not (mask & (1 << last)):
-                    continue
-                for nxt in range(n):
-                    if mask & (1 << nxt):
-                        continue
-                    new_mask = mask | (1 << nxt)
-                    new_cost = cost + stop_to_stop[last][nxt]
-                    if new_cost < dp[new_mask][nxt]:
-                        dp[new_mask][nxt] = new_cost
-                        parent[new_mask][nxt] = last
+        def angle_diff(a, b):
+            return abs((a - b + math.pi) % (2 * math.pi) - math.pi)
 
-        full_mask = (1 << n) - 1
-        end_idx = min(range(n), key=lambda j: dp[full_mask][j])
-        if dp[full_mask][end_idx] == inf:
-            return unique_stops
+        best_idx = min(
+            range(len(sorted_stops)),
+            key=lambda i: angle_diff(
+                math.atan2(sorted_stops[i][1] - cy, sorted_stops[i][0] - cx),
+                start_angle,
+            ),
+        )
+        tour = sorted_stops[best_idx:] + sorted_stops[:best_idx]
 
-        order_indices = []
-        mask = full_mask
-        current = end_idx
-        while current is not None:
-            order_indices.append(current)
-            prev = parent[mask][current]
-            mask &= ~(1 << current)
-            current = prev
+        # Step 3 — single 2-opt pass to remove crossing edges.
+        # Treat the tour as a closed loop (virtual return edge to start_node
+        # is included in the cost check so the closing leg stays short).
+        n = len(tour)
+        improved = True
+        while improved:
+            improved = False
+            for i in range(n - 1):
+                for j in range(i + 2, n):
+                    # Nodes at the ends of the two edges being considered.
+                    a, b = tour[i], tour[(i + 1) % n]
+                    c, d = tour[j], tour[(j + 1) % n]
+                    if euclid2(a, b) + euclid2(c, d) > euclid2(a, c) + euclid2(b, d):
+                        # Reverse the segment between i+1 and j (inclusive).
+                        tour[i + 1:j + 1] = tour[i + 1:j + 1][::-1]
+                        improved = True
 
-        order_indices.reverse()
-        return [unique_stops[idx] for idx in order_indices]
+        return tour
 
     def assign_daily_households_and_routes(self, lsoa_code, agents):
         """
@@ -803,5 +771,3 @@ class FieldWorkModel(mesa.Model):
             self.update_daily_target_lsoas()
             self.assign_agents_to_target_lsoas()
             self._prev_day = self.current_day
-
-

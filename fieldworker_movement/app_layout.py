@@ -40,6 +40,39 @@ def edge_trace_data(graph):
     return lons, lats
 
 
+def _build_route_geometry(model):
+    """
+    Build lon/lat arrays for each field staff agent's remaining planned route,
+    following the road network between consecutive waypoints. Segments are
+    separated by None so Plotly draws them as separate lines.
+
+    Only the not-yet-visited portion of each agent's route is included,
+    starting from the agent's current node.
+    """
+    all_lons, all_lats = [], []
+    for agent in model.field_staff:
+        waypoints = agent.vrp_waypoints
+        if not waypoints:
+            continue
+        remaining = waypoints[agent.vrp_waypoint_index:]
+        if not remaining:
+            continue
+        nodes = [agent.node] + remaining
+        for i in range(len(nodes) - 1):
+            path = model.get_road_path(nodes[i], nodes[i + 1])
+            if not path:
+                continue
+            seg_lons, seg_lats = to_wgs84(
+                [n[0] for n in path],
+                [n[1] for n in path],
+            )
+            all_lons.extend(seg_lons)
+            all_lons.append(None)
+            all_lats.extend(seg_lats)
+            all_lats.append(None)
+    return all_lons, all_lats
+
+
 def build_initial_figure(model, centre_lon, centre_lat, viz_data):
     """
     Construct a Plotly figure with four traces:
@@ -98,6 +131,17 @@ def build_initial_figure(model, centre_lon, centre_lat, viz_data):
         hovertemplate='%{customdata}<br>%{z:.0f}%<extra></extra>',
     ))
 
+    # Trace 4 — agent planned routes (toggled on/off, updated at day boundaries)
+    fig.add_trace(go.Scattermapbox(
+        lon=[],
+        lat=[],
+        mode='lines',
+        line={'width': 2, 'color': 'red'},
+        name='Agent routes',
+        hoverinfo='skip',
+        visible=False,
+    ))
+
     fig.update_layout(
         mapbox={
             'style': 'open-street-map',
@@ -142,6 +186,15 @@ def create_layout(initial_fig):
                 value='knocks',
                 inline=True,
                 style={'display': 'inline-block', 'marginLeft': '6px'},
+            ),
+
+            html.Span('  |  ', style={'marginLeft': '12px'}),
+            dcc.Checklist(
+                id='route-toggle',
+                options=[{'label': ' Show agent routes', 'value': 'show'}],
+                value=[],
+                inline=True,
+                style={'display': 'inline-block'},
             ),
 
             # Settings dropdown — sliders

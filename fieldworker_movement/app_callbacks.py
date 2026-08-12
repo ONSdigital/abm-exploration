@@ -2,7 +2,7 @@
 Dash callbacks for the Fieldworker ABM visualisation.
 """
 import dash
-from app_layout import build_initial_figure
+from app_layout import _build_route_geometry, build_initial_figure
 from config import METRIC_METADATA, daily_hh_per_agent, num_field_staff
 from dash import Input, Output, Patch, State, html, no_update
 
@@ -128,10 +128,11 @@ def init_callbacks(app, state, viz_data):
         State('choropleth-interval-slider', 'value'),
         State('step-duration-slider', 'value'),
         State('steps-per-tick-slider', 'value'),
+        State('route-toggle', 'value'),
         prevent_initial_call=True,
     )
     def tick(n_intervals, store, metric, choropleth_interval,
-             step_duration, steps_per_tick):
+             step_duration, steps_per_tick, route_toggle):
         """
         Advance the simulation by one step and patch:
           - Trace 1 (field staff) every step.
@@ -156,11 +157,13 @@ def init_callbacks(app, state, viz_data):
             )
 
         steps_per_tick = int(steps_per_tick or 1)
+        day_changed = False
         for _ in range(steps_per_tick):
             day_before_step = model.current_day
             model.step()
 
             if model.current_day != day_before_step:
+                day_changed = True
                 pending_staff = int(store.get('pending_field_staff', 
                                               len(model.field_staff)))
                 current_staff_count = int(store.get('current_field_staff', 
@@ -200,6 +203,13 @@ def init_callbacks(app, state, viz_data):
         metric = metric or 'knocks'
         if store['step'] % interval == 0:
             _apply_choropleth(patched_fig, model, metric)
+
+        show_routes = bool(route_toggle)
+        patched_fig['data'][4]['visible'] = show_routes
+        if show_routes and day_changed:
+            route_lons, route_lats = _build_route_geometry(model)
+            patched_fig['data'][4]['lon'] = route_lons
+            patched_fig['data'][4]['lat'] = route_lats
 
         current_staff = int(store['current_field_staff'])
         current_daily_hh = int(store['current_daily_hh_per_agent'])
@@ -270,15 +280,41 @@ def init_callbacks(app, state, viz_data):
 
     @app.callback(
         Output('map', 'figure', allow_duplicate=True),
-        Input('run-store', 'data'),
+        Input('route-toggle', 'value'),
         prevent_initial_call=True,
     )
-    def reset_figure(store):
+    def update_route_visibility(route_toggle):
+        """
+        Immediately show or hide agent routes when the toggle changes,
+        without waiting for the next simulation tick.
+        """
+        patched_fig = Patch()
+        show = bool(route_toggle)
+        patched_fig['data'][4]['visible'] = show
+        if show:
+            route_lons, route_lats = _build_route_geometry(state['model'])
+            patched_fig['data'][4]['lon'] = route_lons
+            patched_fig['data'][4]['lat'] = route_lats
+        return patched_fig
+
+    @app.callback(
+        Output('map', 'figure', allow_duplicate=True),
+        Input('run-store', 'data'),
+        State('route-toggle', 'value'),
+        prevent_initial_call=True,
+    )
+    def reset_figure(store, route_toggle):
         """Return a fully rebuilt figure after a reset."""
         current_reset_id = store.get('reset_id')
         if current_reset_id is None or current_reset_id == state['last_reset_id']:
             return no_update
         state['last_reset_id'] = current_reset_id
-        return build_initial_figure(
+        fig = build_initial_figure(
             state['model'], state['centre_lon'], state['centre_lat'], viz_data
         )
+        if route_toggle:
+            route_lons, route_lats = _build_route_geometry(state['model'])
+            fig.data[4].lon = route_lons
+            fig.data[4].lat = route_lats
+            fig.data[4].visible = True
+        return fig
