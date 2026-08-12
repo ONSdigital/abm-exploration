@@ -131,27 +131,6 @@ class FieldWorker(mesa.Agent):
         self.edge_progress = 0.0
         self.display_position = self.node
 
-    def has_incomplete_household_at_node(self, node):
-        """
-        Returns True when the agent's node still has a household that has not 
-        completed the Census questionnaire.
-
-        Parameters
-        ----------
-        node : tuple
-            The (easting, northing) coordinates of the node to check.
-
-        Returns
-        -------
-        bool
-            True if there is at least one incomplete household at the node, 
-            False otherwise.
-        """
-        return any(
-            not household.survey_completed
-            for household in self.model.node_to_households.get(node, [])
-        )
-
     def has_incomplete_households(self):
         """
         Returns True if any household in the model has yet to complete their 
@@ -212,28 +191,20 @@ class FieldWorker(mesa.Agent):
                 return vrp_target
 
             # Priority 2: nearest assigned incomplete household.
-            assigned_incomplete = [
-                household.node for household in self.daily_assigned_households
-                if not household.survey_completed
-            ]
-            if assigned_incomplete:
+            if self.pending_assigned_households:
                 return min(
-                    assigned_incomplete,
+                    (hh.node for hh in self.pending_assigned_households),
                     key=lambda node: (node[0] - self.node[0]) ** 2 +
                                      (node[1] - self.node[1]) ** 2,
                 )
 
             return None
 
-        # Global household finder fallback used for unassigned agents.
-        return min(
-            (
-                household.node for household in self.model.households
-                if not household.survey_completed
-            ),
-            key=lambda node: (node[0] - self.node[0]) ** 2 + 
-                                                (node[1] - self.node[1]) ** 2,
-            default=None,
+        raise RuntimeError(
+            f"FieldWorker {self.unique_id} has no assigned LSOA in \
+                choose_target_node(). "
+            "Ensure assign_agents_to_target_lsoas() is called before agents \
+                step."
         )
 
     def build_route(self):
@@ -310,7 +281,7 @@ class FieldWorker(mesa.Agent):
             self.clear_route()
             return
 
-        if not self.has_incomplete_households():
+        if not self.has_pending_assigned_households():
             self.clear_route()
             return
 
@@ -413,11 +384,7 @@ class FieldWorker(mesa.Agent):
         Whole process of a field worker visiting a household: knocking, waiting
         for a response, then interacting if someone opens the door.
         """
-        candidates = [
-            household for household in self.daily_assigned_households
-            if household.node == self.node and household not 
-                                                in self.households_knocked
-        ]
+        candidates = list(self.node_to_pending_assigned.get(self.node, set()))
         if not candidates:
             return
         household = self.random.choice(candidates)
