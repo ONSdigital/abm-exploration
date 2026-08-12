@@ -131,6 +131,20 @@ class FieldWorker(mesa.Agent):
         self.edge_progress = 0.0
         self.display_position = self.node
 
+    def reset_daily_state(self):
+        """
+        Clear all per-day routing and assignment state. Called when an agent
+        has no target LSOA or could not be placed in one.
+        """
+        self.assigned_lsoa = None
+        self.clear_route()
+        self.vrp_waypoint_index = 0
+        self.daily_assigned_households = []
+        self.households_knocked = set()
+        self.pending_assigned_households = set()
+        self.node_to_pending_assigned = {}
+        self.vrp_waypoints = []
+
     def has_incomplete_households(self):
         """
         Returns True if any household in the model has yet to complete their 

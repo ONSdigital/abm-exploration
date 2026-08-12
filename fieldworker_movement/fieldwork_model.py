@@ -58,23 +58,11 @@ class FieldWorkModel(mesa.Model):
         self.workday_duration_hours = workday_duration_hours
         self.workday_start_seconds = self.workday_start_hour * 60 * 60
         self.workday_duration_seconds = self.workday_duration_hours * 60 * 60
-        self.current_day = 1
-        self.seconds_since_midnight = self.workday_start_seconds
-        self.total_work_seconds = 0
-        self.current_day_interaction_seconds = 0.0
-        self.daily_interaction_time_pct = {}
-        self.daily_knocks_by_day = {}
-        self.daily_interactions_by_day = {}
-        self.prev_day_lsoa_knocks_snapshot = {}
-        self.prev_day_lsoa_interactions_snapshot = {}
-        self.daily_target_lsoas = []
-        self._prev_day = 1  # Track day boundaries for routing trigger
+        self._reset_run_counters()
         self.shortest_path_cache = {}  # Cache for road-network distances: 
                                        # (node_a, node_b) -> length
         self.shortest_path_nodes_cache = {}  # Cache for road-network paths:
                                              # (node_a, node_b) -> [node, ...]
-        self._incomplete_nodes_cache = {}  # Cache for incomplete nodes per LSOA:
-                                           # lsoa_code -> [node, ...]
 
         gdf = load_network_data(ROADS_FILEPATH, PATHS_FILEPATH)
         G = build_graph_from_shapefile(gdf)
@@ -140,9 +128,6 @@ class FieldWorkModel(mesa.Model):
             lsoa: 0 for lsoa in self.lsoa_stats
         }
 
-        # One entry per step: {'step': N, 'lsoa_stats': {lsoa: {knocks, interactions}}}
-        self.step_history = []
-
         self.field_staff = FieldWorker.create_agents(
             model=self,
             n=num_field_staff,
@@ -150,6 +135,24 @@ class FieldWorkModel(mesa.Model):
         )
         self.update_daily_target_lsoas()
         self.assign_agents_to_target_lsoas()
+
+    def _reset_run_counters(self):
+        """
+        Reset all mutable per-run state to initial values. Called from both
+        __init__ and reset.
+        """
+        self.current_day = 1
+        self.seconds_since_midnight = self.workday_start_seconds
+        self.steps = 0
+        self.current_day_interaction_seconds = 0.0
+        self.daily_interaction_time_pct = {}
+        self.daily_knocks_by_day = {}
+        self.daily_interactions_by_day = {}
+        self.prev_day_lsoa_knocks_snapshot = {}
+        self.prev_day_lsoa_interactions_snapshot = {}
+        self.daily_target_lsoas = []
+        self._prev_day = 1
+        self._incomplete_nodes_cache = {}
 
     def get_lsoa_completion_rates(self, lsoa_code):
         """
@@ -264,7 +267,6 @@ class FieldWorkModel(mesa.Model):
         shift ends.
         """
         self.seconds_since_midnight += self.simulation_step_seconds
-        self.total_work_seconds += self.simulation_step_seconds
 
         elapsed_today = self.seconds_since_midnight - self.workday_start_seconds
         if elapsed_today >= self.workday_duration_seconds:
@@ -346,7 +348,7 @@ class FieldWorkModel(mesa.Model):
             The shortest-path length in metres, or float('inf') if no path exists.
         """
         # Normalize key to avoid (A, B) and (B, A) as separate entries
-        key = tuple(sorted([node_a, node_b]))
+        key = (node_a, node_b) if node_a <= node_b else (node_b, node_a)
         if key in self.shortest_path_cache:
             return self.shortest_path_cache[key]
 
@@ -587,14 +589,7 @@ class FieldWorkModel(mesa.Model):
         # No targets: clear all daily assignment state to avoid stale routes.
         if not self.daily_target_lsoas:
             for agent in self.field_staff:
-                agent.assigned_lsoa = None
-                agent.clear_route()
-                agent.vrp_waypoint_index = 0
-                agent.daily_assigned_households = []
-                agent.households_knocked = set()
-                agent.pending_assigned_households = set()
-                agent.node_to_pending_assigned = {}
-                agent.vrp_waypoints = []
+                agent.reset_daily_state()
             return {}
 
         capacity_by_lsoa = {
@@ -633,14 +628,7 @@ class FieldWorkModel(mesa.Model):
                 break
 
             if not placed:
-                agent.assigned_lsoa = None
-                agent.clear_route()
-                agent.vrp_waypoint_index = 0
-                agent.daily_assigned_households = []
-                agent.households_knocked = set()
-                agent.pending_assigned_households = set()
-                agent.node_to_pending_assigned = {}
-                agent.vrp_waypoints = []
+                agent.reset_daily_state()
 
         # Start each day from a fresh random incomplete node for every assigned
         # agent, including carryovers that stayed in the same LSOA.
@@ -698,20 +686,7 @@ class FieldWorkModel(mesa.Model):
             Daily household target per agent. Defaults to the current value.
         """
         # Reset time / simulation state
-        self.current_day = 1
-        self.seconds_since_midnight = self.workday_start_seconds
-        self.total_work_seconds = 0
-        self.current_day_interaction_seconds = 0.0
-        self.daily_interaction_time_pct = {}
-        self.daily_knocks_by_day = {}
-        self.daily_interactions_by_day = {}
-        self.prev_day_lsoa_knocks_snapshot = {}
-        self.prev_day_lsoa_interactions_snapshot = {}
-        self.daily_target_lsoas = []
-        self._prev_day = 1
-        self.steps = 0
-        self.step_history = []
-        self._incomplete_nodes_cache = {}
+        self._reset_run_counters()
 
         if hh_per_agent is not None:
             self.hh_per_agent = hh_per_agent
@@ -829,15 +804,4 @@ class FieldWorkModel(mesa.Model):
             self.assign_agents_to_target_lsoas()
             self._prev_day = self.current_day
 
-        # Snapshot cumulative LSOA stats for this step (shallow copy per LSOA).
-        self.step_history.append({
-            'step': self.steps,
-            'day': self.current_day,
-            'display_time': self.format_simulation_time(),
-            'lsoa_stats': {
-                lsoa: dict(counts)
-                for lsoa, counts in self.lsoa_stats.items()
-            }
-        })
-        # Could have a one-off end of day method that sends field staff back to one
-        # or two houses that didn't answer
+
