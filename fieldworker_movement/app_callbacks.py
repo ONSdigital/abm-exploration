@@ -129,10 +129,11 @@ def init_callbacks(app, state, viz_data):
         State('step-duration-slider', 'value'),
         State('steps-per-tick-slider', 'value'),
         State('route-toggle', 'value'),
+        State('simulation-duration-slider', 'value'),
         prevent_initial_call=True,
     )
     def tick(n_intervals, store, metric, choropleth_interval,
-             step_duration, steps_per_tick, route_toggle):
+             step_duration, steps_per_tick, route_toggle, max_days):
         """
         Advance the simulation by one step and patch:
           - Trace 1 (field staff) every step.
@@ -185,6 +186,9 @@ def init_callbacks(app, state, viz_data):
                     model.update_daily_target_lsoas()
                     model.assign_agents_to_target_lsoas()
 
+                if max_days is not None and model.current_day > int(max_days):
+                    store['running'] = False
+                    break
 
         store['step'] = model.steps
 

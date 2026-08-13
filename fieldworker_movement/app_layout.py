@@ -281,6 +281,22 @@ def create_layout(initial_fig):
                         html.Span('(applied at start of next day)',
                                   style={'fontSize': '0.8em',
                                          'color': '#555'}),
+                    ], style={'width': '220px', 'marginRight': '32px'}),
+
+                    # Simulation duration slider
+                    html.Div([
+                        html.Span('Simulation duration',
+                                  style={'fontWeight': 'bold'}),
+                        dcc.Slider(
+                            id='simulation-duration-slider',
+                            min=1, max=10, step=1, value=7,
+                            marks={1: '1', 5: '5', 10: '10'},
+                            tooltip={'placement': 'bottom',
+                                     'always_visible': False},
+                        ),
+                        html.Span('days',
+                                  style={'fontSize': '0.8em',
+                                         'color': '#555'}),
                     ], style={'width': '220px'}),
 
                 ], style={
