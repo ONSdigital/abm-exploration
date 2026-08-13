@@ -385,7 +385,9 @@ def create_layout(initial_fig):
                                 style={'float': 'right', 'cursor': 'pointer'}),
                 ], style={'marginBottom': '12px', 'overflow': 'hidden'}),
                 dcc.Graph(id='interaction-time-chart',
-                          style={'height': '75vh'}),
+                          style={'height': '60vh'}),
+                dcc.Graph(id='knocks-interactions-chart',
+                          style={'height': '60vh', 'marginTop': '24px'}),
             ],
             style={
                 'display': 'none',

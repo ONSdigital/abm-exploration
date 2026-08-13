@@ -266,13 +266,14 @@ def init_callbacks(app, state, viz_data):
     @app.callback(
         Output('results-overlay', 'style'),
         Output('interaction-time-chart', 'figure'),
+        Output('knocks-interactions-chart', 'figure'),
         Input('view-results-btn', 'n_clicks'),
         Input('close-results-btn', 'n_clicks'),
         prevent_initial_call=True,
     )
     def toggle_results_overlay(open_clicks, close_clicks):
         """
-        Opens/closes the results overlay and populates the chart.
+        Opens/closes the results overlay and populates the charts.
         """
         _overlay_visible = {
             'display': 'block',
@@ -289,7 +290,7 @@ def init_callbacks(app, state, viz_data):
         _overlay_hidden = dict(_overlay_visible, display='none')
 
         if dash.callback_context.triggered_id == 'close-results-btn':
-            return _overlay_hidden, no_update
+            return _overlay_hidden, no_update, no_update
 
         model = state['model']
         data = model.daily_interaction_time_pct
@@ -300,17 +301,17 @@ def init_callbacks(app, state, viz_data):
                 xaxis_title='Day',
                 yaxis_title='Interaction time (%)',
             )
-            return _overlay_visible, empty_fig
+            return _overlay_visible, empty_fig, go.Figure()
 
         days = sorted(data.keys())
         pcts = [data[d] for d in days]
-        fig = go.Figure(go.Bar(
+        fig_time = go.Figure(go.Bar(
             x=[f'Day {d}' for d in days],
             y=pcts,
             marker_color='steelblue',
-            hovertemplate='%{x}: %{y:.1f}%<extra></extra>'
+            hovertemplate='%{x}: %{y:.1f}%<extra></extra>',
         ))
-        fig.update_layout(
+        fig_time.update_layout(
             title='Field staff interaction time by day',
             xaxis_title='Day',
             yaxis_title='Interaction time (%)',
@@ -318,7 +319,37 @@ def init_callbacks(app, state, viz_data):
             plot_bgcolor='white',
             bargap=0.3,
         )
-        return _overlay_visible, fig
+
+        knocks_data = model.daily_knocks_by_day
+        interactions_data = model.daily_interactions_by_day
+        knocks = [knocks_data.get(d, 0) for d in days]
+        interactions = [interactions_data.get(d, 0) for d in days]
+        day_labels = [f'Day {d}' for d in days]
+        fig_contacts = go.Figure()
+        fig_contacts.add_trace(go.Bar(
+            x=day_labels,
+            y=knocks,
+            name='Households visited',
+            marker_color='lightsteelblue',
+            hovertemplate='%{x}<br>Visits: %{y}<extra></extra>',
+        ))
+        fig_contacts.add_trace(go.Bar(
+            x=day_labels,
+            y=interactions,
+            name='Interactions',
+            marker_color='steelblue',
+            hovertemplate='%{x}<br>Interactions: %{y}<extra></extra>',
+        ))
+        fig_contacts.update_layout(
+            title='Household visits and interactions by day',
+            xaxis_title='Day',
+            yaxis_title='Households',
+            barmode='overlay',
+            plot_bgcolor='white',
+            bargap=0.3,
+            legend={'orientation': 'h', 'y': -0.2},
+        )
+        return _overlay_visible, fig_time, fig_contacts
 
     @app.callback(
         Output('map', 'figure', allow_duplicate=True),
