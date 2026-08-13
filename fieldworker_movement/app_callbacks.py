@@ -2,6 +2,7 @@
 Dash callbacks for the Fieldworker ABM visualisation.
 """
 import dash
+import plotly.graph_objects as go
 from app_layout import _build_route_geometry, build_initial_figure
 from config import METRIC_METADATA, daily_hh_per_agent, num_field_staff
 from dash import Input, Output, Patch, State, html, no_update
@@ -261,6 +262,63 @@ def init_callbacks(app, state, viz_data):
         for day in sorted(data):
             lines.append(html.Div(f'Day {day}: {formatter(data[day])}'))
         return lines
+
+    @app.callback(
+        Output('results-overlay', 'style'),
+        Output('interaction-time-chart', 'figure'),
+        Input('view-results-btn', 'n_clicks'),
+        Input('close-results-btn', 'n_clicks'),
+        prevent_initial_call=True,
+    )
+    def toggle_results_overlay(open_clicks, close_clicks):
+        """
+        Opens/closes the results overlay and populates the chart.
+        """
+        _overlay_visible = {
+            'display': 'block',
+            'position': 'fixed',
+            'top': '5vh', 'left': '5vw',
+            'width': '90vw', 'height': '90vh',
+            'background': 'white',
+            'zIndex': 1000,
+            'padding': '20px',
+            'boxShadow': '0 4px 24px rgba(0,0,0,0.45)',
+            'overflowY': 'auto',
+            'borderRadius': '8px',
+        }
+        _overlay_hidden = dict(_overlay_visible, display='none')
+
+        if dash.callback_context.triggered_id == 'close-results-btn':
+            return _overlay_hidden, no_update
+
+        model = state['model']
+        data = model.daily_interaction_time_pct
+        if not data:
+            empty_fig = go.Figure()
+            empty_fig.update_layout(
+                title='No completed days yet.',
+                xaxis_title='Day',
+                yaxis_title='Interaction time (%)',
+            )
+            return _overlay_visible, empty_fig
+
+        days = sorted(data.keys())
+        pcts = [data[d] for d in days]
+        fig = go.Figure(go.Bar(
+            x=[f'Day {d}' for d in days],
+            y=pcts,
+            marker_color='steelblue',
+            hovertemplate='%{x}: %{y:.1f}%<extra></extra>'
+        ))
+        fig.update_layout(
+            title='Field staff interaction time by day',
+            xaxis_title='Day',
+            yaxis_title='Interaction time (%)',
+            yaxis={'range': [0, 100]},
+            plot_bgcolor='white',
+            bargap=0.3,
+        )
+        return _overlay_visible, fig
 
     @app.callback(
         Output('map', 'figure', allow_duplicate=True),

@@ -3,6 +3,7 @@ Dash layout and figure builder for the Fieldworker ABM visualisation. Controls
 the web page visualisation of the model.
 Aaron Stace, 06/07/2026
 """
+import plotly.express as px
 import plotly.graph_objects as go
 from config import (
     METRIC_METADATA,
@@ -170,6 +171,8 @@ def create_layout(initial_fig):
             html.Button('⏸ Pause', id='pause-btn', n_clicks=0,
                         style={'marginRight': '8px'}),
             html.Button('↺ Reset', id='reset-btn', n_clicks=0),
+            html.Button('📊 View Results', id='view-results-btn', n_clicks=0,
+                        style={'marginLeft': '8px'}),
             html.Span('Step: 0 | Day 1 | 09:00:00', id='step-counter',
                       style={'marginLeft': '16px', 'fontFamily': 'monospace'}),
 
@@ -371,4 +374,30 @@ def create_layout(initial_fig):
 
         # Store: currently selected choropleth metric ('knocks' or 'interactions')
         dcc.Store(id='metric-store', data='knocks'),
+
+        html.Div(
+            id='results-overlay',
+            children=[
+                html.Div([
+                    html.Span('Simulation Results',
+                              style={'fontWeight': 'bold', 'fontSize': '1.2em'}),
+                    html.Button('✕ Close', id='close-results-btn', n_clicks=0,
+                                style={'float': 'right', 'cursor': 'pointer'}),
+                ], style={'marginBottom': '12px', 'overflow': 'hidden'}),
+                dcc.Graph(id='interaction-time-chart',
+                          style={'height': '75vh'}),
+            ],
+            style={
+                'display': 'none',
+                'position': 'fixed',
+                'top': '5vh', 'left': '5vw',
+                'width': '90vw', 'height': '90vh',
+                'background': 'white',
+                'zIndex': 1000,
+                'padding': '20px',
+                'boxShadow': '0 4px 24px rgba(0,0,0,0.45)',
+                'overflowY': 'auto',
+                'borderRadius': '8px',
+            },
+        ),
     ])
