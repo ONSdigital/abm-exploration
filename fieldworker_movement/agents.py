@@ -5,7 +5,6 @@ visiting households.
 Aaron Stace, 08/06/2026
 """
 import mesa
-import networkx as nx
 from config import (
     INTERACTION_COMPLETION_CHANCE,
     KNOCK_COMPLETION_CHANCE,
@@ -92,6 +91,8 @@ class FieldWorker(mesa.Agent):
         self.vrp_waypoint_index = 0  # Current position in waypoints list
         self.daily_assigned_households = []  # Households allocated for today's workload
         self.households_knocked = set()  # Assigned households already knocked today
+        self.pending_assigned_households = set()  # Assigned households not yet knocked (O(1) lookup)
+        self.node_to_pending_assigned = {}  # node -> set[Household] for pending households
         self.assigned_day = None  # Day when this agent was last assigned (for diagnostics)
 
     def has_pending_assigned_household_at_node(self, node):
@@ -102,19 +103,13 @@ class FieldWorker(mesa.Agent):
         if node is None:
             return False
 
-        return any(
-            (household.node == node) and (household not in self.households_knocked)
-            for household in self.daily_assigned_households
-        )
+        return bool(self.node_to_pending_assigned.get(node))
 
     def has_pending_assigned_households(self):
         """
         Return True if this agent still has assigned households to knock on.
         """
-        return any(
-            household not in self.households_knocked
-            for household in self.daily_assigned_households
-        )
+        return bool(self.pending_assigned_households)
 
     def has_knocked_all_assigned_households(self):
         """
@@ -136,26 +131,19 @@ class FieldWorker(mesa.Agent):
         self.edge_progress = 0.0
         self.display_position = self.node
 
-    def has_incomplete_household_at_node(self, node):
+    def reset_daily_state(self):
         """
-        Returns True when the agent's node still has a household that has not 
-        completed the Census questionnaire.
-
-        Parameters
-        ----------
-        node : tuple
-            The (easting, northing) coordinates of the node to check.
-
-        Returns
-        -------
-        bool
-            True if there is at least one incomplete household at the node, 
-            False otherwise.
+        Clear all per-day routing and assignment state. Called when an agent
+        has no target LSOA or could not be placed in one.
         """
-        return any(
-            not household.survey_completed
-            for household in self.model.node_to_households.get(node, [])
-        )
+        self.assigned_lsoa = None
+        self.clear_route()
+        self.vrp_waypoint_index = 0
+        self.daily_assigned_households = []
+        self.households_knocked = set()
+        self.pending_assigned_households = set()
+        self.node_to_pending_assigned = {}
+        self.vrp_waypoints = []
 
     def has_incomplete_households(self):
         """
@@ -217,28 +205,20 @@ class FieldWorker(mesa.Agent):
                 return vrp_target
 
             # Priority 2: nearest assigned incomplete household.
-            assigned_incomplete = [
-                household.node for household in self.daily_assigned_households
-                if not household.survey_completed
-            ]
-            if assigned_incomplete:
+            if self.pending_assigned_households:
                 return min(
-                    assigned_incomplete,
+                    (hh.node for hh in self.pending_assigned_households),
                     key=lambda node: (node[0] - self.node[0]) ** 2 +
                                      (node[1] - self.node[1]) ** 2,
                 )
 
             return None
 
-        # Global household finder fallback used for unassigned agents.
-        return min(
-            (
-                household.node for household in self.model.households
-                if not household.survey_completed
-            ),
-            key=lambda node: (node[0] - self.node[0]) ** 2 + 
-                                                (node[1] - self.node[1]) ** 2,
-            default=None,
+        raise RuntimeError(
+            f"FieldWorker {self.unique_id} has no assigned LSOA in \
+                choose_target_node(). "
+            "Ensure assign_agents_to_target_lsoas() is called before agents \
+                step."
         )
 
     def build_route(self):
@@ -265,14 +245,8 @@ class FieldWorker(mesa.Agent):
             self.display_position = self.node
             return True
 
-        try:
-            self.route_nodes = nx.shortest_path(
-                self.model.graph,
-                self.node,
-                target_node,
-                weight='length',
-            )
-        except (nx.NetworkXNoPath, nx.NodeNotFound):
+        self.route_nodes = self.model.get_road_path(self.node, target_node)
+        if not self.route_nodes:
             self.clear_route()
             return False
 
@@ -321,7 +295,7 @@ class FieldWorker(mesa.Agent):
             self.clear_route()
             return
 
-        if not self.has_incomplete_households():
+        if not self.has_pending_assigned_households():
             self.clear_route()
             return
 
@@ -387,6 +361,8 @@ class FieldWorker(mesa.Agent):
         """
         self.model.lsoa_stats[household.lsoa]['knocks'] += 1
         self.households_knocked.add(household)
+        self.pending_assigned_households.discard(household)
+        self.node_to_pending_assigned.get(household.node, set()).discard(household)
         # If not in, put in a postcard. Does this prompt a response? Does it 
         # annoy them?
         return self.random.random() < household.knock_response_chance
@@ -422,11 +398,7 @@ class FieldWorker(mesa.Agent):
         Whole process of a field worker visiting a household: knocking, waiting
         for a response, then interacting if someone opens the door.
         """
-        candidates = [
-            household for household in self.daily_assigned_households
-            if household.node == self.node and household not 
-                                                in self.households_knocked
-        ]
+        candidates = list(self.node_to_pending_assigned.get(self.node, set()))
         if not candidates:
             return
         household = self.random.choice(candidates)

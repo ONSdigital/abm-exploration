@@ -16,9 +16,7 @@ from config import (
     DEFAULT_ONGOING_COMPLETION_RATE,
     INITIAL_COMPLETION_COLUMN,
     KNOCK_RESPONSE_CHANCE,
-    LSOA_CODE_COLUMN,
     LSOA_COMPLETION_FILEPATH,
-    LSOAS_FILEPATH,
     ONGOING_COMPLETION_COLUMN,
     PATHS_FILEPATH,
     ROADS_FILEPATH,
@@ -33,7 +31,6 @@ from mapping import (
     connect_components,
     load_addresses,
     load_lsoa_completion_rates,
-    load_lsoa_geojson,
     load_network_data,
     snap_addresses_to_nodes,
     to_wgs84,
@@ -61,24 +58,15 @@ class FieldWorkModel(mesa.Model):
         self.workday_duration_hours = workday_duration_hours
         self.workday_start_seconds = self.workday_start_hour * 60 * 60
         self.workday_duration_seconds = self.workday_duration_hours * 60 * 60
-        self.current_day = 1
-        self.seconds_since_midnight = self.workday_start_seconds
-        self.total_work_seconds = 0
-        self.current_day_interaction_seconds = 0.0
-        self.daily_interaction_time_pct = {}
-        self.daily_knocks_by_day = {}
-        self.daily_interactions_by_day = {}
-        self.prev_day_lsoa_knocks_snapshot = {}
-        self.prev_day_lsoa_interactions_snapshot = {}
-        self.daily_target_lsoas = []
-        self._prev_day = 1  # Track day boundaries for routing trigger
-        self.shortest_path_cache = {}  # Cache for road-network distances: 
-                                       # (node_a, node_b) -> length
+        self._reset_run_counters()
+        self.shortest_path_nodes_cache = {}  # Cache for road-network paths:
+                                             # (node_a, node_b) -> [node, ...]
 
         gdf = load_network_data(ROADS_FILEPATH, PATHS_FILEPATH)
         G = build_graph_from_shapefile(gdf)
         G = connect_components(G)
         gdf_addresses = load_addresses(ADDRESSES_FILEPATH)
+        self.gdf_addresses = gdf_addresses
         self.lsoa_completion_rates = load_lsoa_completion_rates(
             LSOA_COMPLETION_FILEPATH
         )
@@ -138,20 +126,6 @@ class FieldWorkModel(mesa.Model):
             lsoa: 0 for lsoa in self.lsoa_stats
         }
 
-        # One entry per step: {'step': N, 'lsoa_stats': {lsoa: {knocks, interactions}}}
-        self.step_history = []
-
-        # Storing display-only true geographic positions of addresses (WGS84) 
-        # for the visualisation background layer.
-        self.address_lons, self.address_lats = to_wgs84(
-            gdf_addresses.geometry.x, gdf_addresses.geometry.y
-        )
-
-        # LSOA polygon geometry for the live choropleth layer.
-        self.lsoa_geojson, self.lsoa_ids, self.lsoa_names = load_lsoa_geojson(
-            LSOAS_FILEPATH, LSOA_CODE_COLUMN
-        )
-
         self.field_staff = FieldWorker.create_agents(
             model=self,
             n=num_field_staff,
@@ -159,6 +133,24 @@ class FieldWorkModel(mesa.Model):
         )
         self.update_daily_target_lsoas()
         self.assign_agents_to_target_lsoas()
+
+    def _reset_run_counters(self):
+        """
+        Reset all mutable per-run state to initial values. Called from both
+        __init__ and reset.
+        """
+        self.current_day = 1
+        self.seconds_since_midnight = self.workday_start_seconds
+        self.steps = 0
+        self.current_day_interaction_seconds = 0.0
+        self.daily_interaction_time_pct = {}
+        self.daily_knocks_by_day = {}
+        self.daily_interactions_by_day = {}
+        self.prev_day_lsoa_knocks_snapshot = {}
+        self.prev_day_lsoa_interactions_snapshot = {}
+        self.daily_target_lsoas = []
+        self._prev_day = 1
+        self._incomplete_nodes_cache = {}
 
     def get_lsoa_completion_rates(self, lsoa_code):
         """
@@ -242,6 +234,7 @@ class FieldWorkModel(mesa.Model):
         stats['questionnaire_completions'] += 1
         stats[f'{characteristic}_questionnaire_completions'] += 1
         stats['remaining_households'] -= 1
+        self._incomplete_nodes_cache.pop(household.lsoa, None)
         return True
 
     def advance_electronic_completions(self):
@@ -272,7 +265,6 @@ class FieldWorkModel(mesa.Model):
         shift ends.
         """
         self.seconds_since_midnight += self.simulation_step_seconds
-        self.total_work_seconds += self.simulation_step_seconds
 
         elapsed_today = self.seconds_since_midnight - self.workday_start_seconds
         if elapsed_today >= self.workday_duration_seconds:
@@ -325,17 +317,22 @@ class FieldWorkModel(mesa.Model):
         list[tuple]
             Unique (easting, northing) nodes with incomplete households.
         """
+        if lsoa_code in self._incomplete_nodes_cache:
+            return self._incomplete_nodes_cache[lsoa_code]
+
         nodes = []
         seen = set()
         for household in self.lsoa_to_households.get(lsoa_code, []):
             if not household.survey_completed and household.node not in seen:
                 nodes.append(household.node)
                 seen.add(household.node)
+
+        self._incomplete_nodes_cache[lsoa_code] = nodes
         return nodes
 
-    def get_road_distance(self, node_a, node_b):
+    def get_road_path(self, node_a, node_b):
         """
-        Get the road-network shortest-path distance between two nodes.
+        Get the road-network shortest-path node sequence between two nodes.
         Uses a cache to avoid recomputing the same pair.
 
         Parameters
@@ -345,26 +342,31 @@ class FieldWorkModel(mesa.Model):
 
         Returns
         -------
-        float
-            The shortest-path length in metres, or float('inf') if no path exists.
+        list[tuple]
+            Ordered node sequence from node_a to node_b, or [] if no path
+            exists.
         """
-        # Normalize key to avoid (A, B) and (B, A) as separate entries
-        key = tuple(sorted([node_a, node_b]))
-        if key in self.shortest_path_cache:
-            return self.shortest_path_cache[key]
+        key = (node_a, node_b)
+        if key in self.shortest_path_nodes_cache:
+            return self.shortest_path_nodes_cache[key]
+
+        # Check reversed direction to avoid running Dijkstra twice for A→B
+        # and B→A.
+        reverse_key = (node_b, node_a)
+        if reverse_key in self.shortest_path_nodes_cache:
+            path = list(reversed(self.shortest_path_nodes_cache[reverse_key]))
+            self.shortest_path_nodes_cache[key] = path
+            return path
 
         try:
-            dist = nx.shortest_path_length(
-                self.graph,
-                node_a,
-                node_b,
-                weight='length'
+            path = nx.shortest_path(
+                self.graph, node_a, node_b, weight='length'
             )
         except (nx.NetworkXNoPath, nx.NodeNotFound):
-            dist = float('inf')
+            path = []
 
-        self.shortest_path_cache[key] = dist
-        return dist
+        self.shortest_path_nodes_cache[key] = path
+        return path
 
     def get_incomplete_households_for_lsoa(self, lsoa_code):
         """
@@ -387,13 +389,19 @@ class FieldWorkModel(mesa.Model):
 
     def _build_open_tsp_route(self, start_node, stop_nodes):
         """
-        Build an exact minimum-distance open TSP route from a start node
-        through all stop nodes along the road network.
+        Build a circular-ish route through all stop nodes using angle sort
+        followed by a 2-opt improvement pass.
+
+        Stops are first sorted by polar angle around their centroid, giving a
+        loop-shaped starting tour.
+        A single 2-opt pass then removes any crossing edges introduced by the
+        angle sort (e.g. two stops at similar angles but different radii). All 
+        distance calculations use Euclidean distance.
 
         Parameters
         ----------
         start_node : tuple
-            Start node for the route.
+            (easting, northing) of the agent's current position.
         stop_nodes : list[tuple]
             Nodes that must be visited.
 
@@ -405,58 +413,55 @@ class FieldWorkModel(mesa.Model):
         unique_stops = list(dict.fromkeys(stop_nodes))
         if not unique_stops:
             return []
-
         if len(unique_stops) == 1:
             return unique_stops
 
-        n = len(unique_stops)
-        start_to_stop = [
-            self.get_road_distance(start_node, unique_stops[j])
-            for j in range(n)
-        ]
-        stop_to_stop = [
-            [self.get_road_distance(unique_stops[i], 
-                                    unique_stops[j]) for j in range(n)]
-            for i in range(n)
-        ]
+        def euclid2(a, b):
+            return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2
 
-        inf = float('inf')
-        dp = [[inf] * n for _ in range(1 << n)]
-        parent = [[None] * n for _ in range(1 << n)]
+        # Step 1 — angle sort around centroid.
+        cx = sum(s[0] for s in unique_stops) / len(unique_stops)
+        cy = sum(s[1] for s in unique_stops) / len(unique_stops)
+        sorted_stops = sorted(
+            unique_stops,
+            key=lambda s: math.atan2(s[1] - cy, s[0] - cx)
+        )
 
-        for j in range(n):
-            dp[1 << j][j] = start_to_stop[j]
+        # Step 2 — rotate ring so the entry point is nearest to start_node.
+        start_angle = math.atan2(
+            start_node[1] - cy, start_node[0] - cx
+        )
 
-        for mask in range(1 << n):
-            for last in range(n):
-                cost = dp[mask][last]
-                if cost == inf or not (mask & (1 << last)):
-                    continue
-                for nxt in range(n):
-                    if mask & (1 << nxt):
-                        continue
-                    new_mask = mask | (1 << nxt)
-                    new_cost = cost + stop_to_stop[last][nxt]
-                    if new_cost < dp[new_mask][nxt]:
-                        dp[new_mask][nxt] = new_cost
-                        parent[new_mask][nxt] = last
+        def angle_diff(a, b):
+            return abs((a - b + math.pi) % (2 * math.pi) - math.pi)
 
-        full_mask = (1 << n) - 1
-        end_idx = min(range(n), key=lambda j: dp[full_mask][j])
-        if dp[full_mask][end_idx] == inf:
-            return unique_stops
+        best_idx = min(
+            range(len(sorted_stops)),
+            key=lambda i: angle_diff(
+                math.atan2(sorted_stops[i][1] - cy, sorted_stops[i][0] - cx),
+                start_angle,
+            ),
+        )
+        tour = sorted_stops[best_idx:] + sorted_stops[:best_idx]
 
-        order_indices = []
-        mask = full_mask
-        current = end_idx
-        while current is not None:
-            order_indices.append(current)
-            prev = parent[mask][current]
-            mask &= ~(1 << current)
-            current = prev
+        # Step 3 — single 2-opt pass to remove crossing edges.
+        # Treat the tour as a closed loop (virtual return edge to start_node
+        # is included in the cost check so the closing leg stays short).
+        n = len(tour)
+        improved = True
+        while improved:
+            improved = False
+            for i in range(n - 1):
+                for j in range(i + 2, n):
+                    # Nodes at the ends of the two edges being considered.
+                    a, b = tour[i], tour[(i + 1) % n]
+                    c, d = tour[j], tour[(j + 1) % n]
+                    if euclid2(a, b) + euclid2(c, d) > euclid2(a, c) + euclid2(b, d):
+                        # Reverse the segment between i+1 and j (inclusive).
+                        tour[i + 1:j + 1] = tour[i + 1:j + 1][::-1]
+                        improved = True
 
-        order_indices.reverse()
-        return [unique_stops[idx] for idx in order_indices]
+        return tour
 
     def assign_daily_households_and_routes(self, lsoa_code, agents):
         """
@@ -472,6 +477,8 @@ class FieldWorkModel(mesa.Model):
             agent.clear_route()
             agent.vrp_waypoint_index = 0
             agent.households_knocked = set()
+            agent.pending_assigned_households = set()
+            agent.node_to_pending_assigned = {}
 
         ordered_agents = list(agents)
         start_index = (self.current_day - 1) % len(ordered_agents)
@@ -510,6 +517,10 @@ class FieldWorkModel(mesa.Model):
         for agent in agents:
             assigned_households = assigned_by_agent.get(agent, [])
             agent.daily_assigned_households = assigned_households
+            agent.pending_assigned_households = set(assigned_households)
+            agent.node_to_pending_assigned = {}
+            for hh in assigned_households:
+                agent.node_to_pending_assigned.setdefault(hh.node, set()).add(hh)
             target_nodes = [household.node for household in assigned_households]
             agent.vrp_waypoints = self._build_open_tsp_route(agent.node, target_nodes)
 
@@ -546,12 +557,7 @@ class FieldWorkModel(mesa.Model):
         # No targets: clear all daily assignment state to avoid stale routes.
         if not self.daily_target_lsoas:
             for agent in self.field_staff:
-                agent.assigned_lsoa = None
-                agent.clear_route()
-                agent.vrp_waypoint_index = 0
-                agent.daily_assigned_households = []
-                agent.households_knocked = set()
-                agent.vrp_waypoints = []
+                agent.reset_daily_state()
             return {}
 
         capacity_by_lsoa = {
@@ -590,12 +596,7 @@ class FieldWorkModel(mesa.Model):
                 break
 
             if not placed:
-                agent.assigned_lsoa = None
-                agent.clear_route()
-                agent.vrp_waypoint_index = 0
-                agent.daily_assigned_households = []
-                agent.households_knocked = set()
-                agent.vrp_waypoints = []
+                agent.reset_daily_state()
 
         # Start each day from a fresh random incomplete node for every assigned
         # agent, including carryovers that stayed in the same LSOA.
@@ -653,19 +654,7 @@ class FieldWorkModel(mesa.Model):
             Daily household target per agent. Defaults to the current value.
         """
         # Reset time / simulation state
-        self.current_day = 1
-        self.seconds_since_midnight = self.workday_start_seconds
-        self.total_work_seconds = 0
-        self.current_day_interaction_seconds = 0.0
-        self.daily_interaction_time_pct = {}
-        self.daily_knocks_by_day = {}
-        self.daily_interactions_by_day = {}
-        self.prev_day_lsoa_knocks_snapshot = {}
-        self.prev_day_lsoa_interactions_snapshot = {}
-        self.daily_target_lsoas = []
-        self._prev_day = 1
-        self.steps = 0
-        self.step_history = []
+        self._reset_run_counters()
 
         if hh_per_agent is not None:
             self.hh_per_agent = hh_per_agent
@@ -782,16 +771,3 @@ class FieldWorkModel(mesa.Model):
             self.update_daily_target_lsoas()
             self.assign_agents_to_target_lsoas()
             self._prev_day = self.current_day
-
-        # Snapshot cumulative LSOA stats for this step (shallow copy per LSOA).
-        self.step_history.append({
-            'step': self.steps,
-            'day': self.current_day,
-            'display_time': self.format_simulation_time(),
-            'lsoa_stats': {
-                lsoa: dict(counts)
-                for lsoa, counts in self.lsoa_stats.items()
-            }
-        })
-        # Could have a one-off end of day method that sends field staff back to one
-        # or two houses that didn't answer
