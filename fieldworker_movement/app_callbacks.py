@@ -311,14 +311,25 @@ def init_callbacks(app, state, viz_data):
         fig_time = go.Figure(go.Bar(
             x=[f'Day {d}' for d in days],
             y=pcts,
-            marker_color='steelblue',
+            marker_color='orangered',
             hovertemplate='%{x}: %{y:.1f}%<extra></extra>',
         ))
         fig_time.update_layout(
             title='Field staff interaction time by day',
             xaxis_title='Day',
             yaxis_title='Interaction time (%)',
-            yaxis={'range': [0, 100]},
+            yaxis={
+                'range': [0, 100],
+                'showgrid': True,
+                'gridcolor': 'rgba(200, 200, 200, 0.4)',
+                'showline': True,
+                'linecolor': 'black',
+            },
+            xaxis={
+                'showgrid': False,
+                'showline': True,
+                'linecolor': 'black',
+            },
             plot_bgcolor='white',
             bargap=0.3,
         )
@@ -333,20 +344,31 @@ def init_callbacks(app, state, viz_data):
             x=day_labels,
             y=knocks,
             name='Households visited',
-            marker_color='lightsteelblue',
+            marker_color='blue',
             hovertemplate='%{x}<br>Visits: %{y}<extra></extra>',
         ))
         fig_contacts.add_trace(go.Bar(
             x=day_labels,
             y=interactions,
             name='Interactions',
-            marker_color='steelblue',
+            marker_color='lightblue',
             hovertemplate='%{x}<br>Interactions: %{y}<extra></extra>',
         ))
         fig_contacts.update_layout(
             title='Household visits and interactions by day',
             xaxis_title='Day',
             yaxis_title='Households',
+            yaxis={
+                'showgrid': True,
+                'gridcolor': 'rgba(200, 200, 200, 0.4)',
+                'showline': True,
+                'linecolor': 'black',
+            },
+            xaxis={
+                'showgrid': False,
+                'showline': True,
+                'linecolor': 'black',
+            },
             barmode='overlay',
             plot_bgcolor='white',
             bargap=0.3,
@@ -367,7 +389,7 @@ def init_callbacks(app, state, viz_data):
             y=cumulative_knocks,
             mode='lines+markers',
             name='Cumulative households visited',
-            line={'color': 'lightsteelblue'},
+            line={'color': 'blue'},
             hovertemplate='%{x}<br>Total visits: %{y}<extra></extra>',
         ))
         fig_cumulative.add_trace(go.Scatter(
@@ -375,13 +397,24 @@ def init_callbacks(app, state, viz_data):
             y=cumulative_interactions,
             mode='lines+markers',
             name='Cumulative interactions',
-            line={'color': 'steelblue'},
+            line={'color': 'lightblue'},
             hovertemplate='%{x}<br>Total interactions: %{y}<extra></extra>',
         ))
         fig_cumulative.update_layout(
             title='Cumulative household visits and interactions',
             xaxis_title='Day',
             yaxis_title='Households (cumulative)',
+            yaxis={
+                'showgrid': True,
+                'gridcolor': 'rgba(200, 200, 200, 0.4)',
+                'showline': True,
+                'linecolor': 'black',
+            },
+            xaxis={
+                'showgrid': False,
+                'showline': True,
+                'linecolor': 'black',
+            },
             plot_bgcolor='white',
             legend={'orientation': 'h', 'y': -0.2},
         )
@@ -392,14 +425,23 @@ def init_callbacks(app, state, viz_data):
             x=day_labels,
             y=completion_pcts,
             mode='lines+markers',
-            line={'color': 'steelblue'},
+            line={'color': 'green'},
             hovertemplate='%{x}<br>Completion: %{y:.1f}%<extra></extra>',
         ))
         fig_completion.update_layout(
             title='Questionnaire completion rate',
             xaxis_title='Day',
             yaxis_title='% households completed',
-            yaxis={'range': [0, 100]},
+            yaxis={'range': [0, 100],
+                   'showgrid': True,
+                   'gridcolor': 'rgba(200, 200, 200, 0.4)',
+                   'showline': True,
+                   'linecolor': 'black',
+            },
+            xaxis={'showgrid': False,
+                   'showline': True,
+                   'linecolor': 'black',
+            },
             plot_bgcolor='white',
             showlegend=False,
         )
