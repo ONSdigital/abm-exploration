@@ -267,6 +267,8 @@ def init_callbacks(app, state, viz_data):
         Output('results-overlay', 'style'),
         Output('interaction-time-chart', 'figure'),
         Output('knocks-interactions-chart', 'figure'),
+        Output('cumulative-chart', 'figure'),
+        Output('questionnaire-completion-chart', 'figure'),
         Input('view-results-btn', 'n_clicks'),
         Input('close-results-btn', 'n_clicks'),
         prevent_initial_call=True,
@@ -290,7 +292,7 @@ def init_callbacks(app, state, viz_data):
         _overlay_hidden = dict(_overlay_visible, display='none')
 
         if dash.callback_context.triggered_id == 'close-results-btn':
-            return _overlay_hidden, no_update, no_update
+            return _overlay_hidden, no_update, no_update, no_update, no_update
 
         model = state['model']
         data = model.daily_interaction_time_pct
@@ -301,7 +303,8 @@ def init_callbacks(app, state, viz_data):
                 xaxis_title='Day',
                 yaxis_title='Interaction time (%)',
             )
-            return _overlay_visible, empty_fig, go.Figure()
+            return _overlay_visible, empty_fig, go.Figure(), go.Figure(), \
+                    go.Figure()
 
         days = sorted(data.keys())
         pcts = [data[d] for d in days]
@@ -349,7 +352,59 @@ def init_callbacks(app, state, viz_data):
             bargap=0.3,
             legend={'orientation': 'h', 'y': -0.2},
         )
-        return _overlay_visible, fig_time, fig_contacts
+        cumulative_knocks = []
+        cumulative_interactions = []
+        running_knocks = 0
+        running_interactions = 0
+        for d in days:
+            running_knocks += knocks_data.get(d, 0)
+            running_interactions += interactions_data.get(d, 0)
+            cumulative_knocks.append(running_knocks)
+            cumulative_interactions.append(running_interactions)
+        fig_cumulative = go.Figure()
+        fig_cumulative.add_trace(go.Scatter(
+            x=day_labels,
+            y=cumulative_knocks,
+            mode='lines+markers',
+            name='Cumulative households visited',
+            line={'color': 'lightsteelblue'},
+            hovertemplate='%{x}<br>Total visits: %{y}<extra></extra>',
+        ))
+        fig_cumulative.add_trace(go.Scatter(
+            x=day_labels,
+            y=cumulative_interactions,
+            mode='lines+markers',
+            name='Cumulative interactions',
+            line={'color': 'steelblue'},
+            hovertemplate='%{x}<br>Total interactions: %{y}<extra></extra>',
+        ))
+        fig_cumulative.update_layout(
+            title='Cumulative household visits and interactions',
+            xaxis_title='Day',
+            yaxis_title='Households (cumulative)',
+            plot_bgcolor='white',
+            legend={'orientation': 'h', 'y': -0.2},
+        )
+
+        completion_pct_data = model.daily_questionnaire_completion_pct
+        completion_pcts = [completion_pct_data.get(d, 0) for d in days]
+        fig_completion = go.Figure(go.Scatter(
+            x=day_labels,
+            y=completion_pcts,
+            mode='lines+markers',
+            line={'color': 'steelblue'},
+            hovertemplate='%{x}<br>Completion: %{y:.1f}%<extra></extra>',
+        ))
+        fig_completion.update_layout(
+            title='Questionnaire completion rate',
+            xaxis_title='Day',
+            yaxis_title='% households completed',
+            yaxis={'range': [0, 100]},
+            plot_bgcolor='white',
+            showlegend=False,
+        )
+
+        return _overlay_visible, fig_time, fig_contacts, fig_cumulative, fig_completion
 
     @app.callback(
         Output('map', 'figure', allow_duplicate=True),

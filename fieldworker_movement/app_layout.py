@@ -3,7 +3,6 @@ Dash layout and figure builder for the Fieldworker ABM visualisation. Controls
 the web page visualisation of the model.
 Aaron Stace, 06/07/2026
 """
-import plotly.express as px
 import plotly.graph_objects as go
 from config import (
     METRIC_METADATA,
@@ -384,10 +383,20 @@ def create_layout(initial_fig):
                     html.Button('✕ Close', id='close-results-btn', n_clicks=0,
                                 style={'float': 'right', 'cursor': 'pointer'}),
                 ], style={'marginBottom': '12px', 'overflow': 'hidden'}),
-                dcc.Graph(id='interaction-time-chart',
-                          style={'height': '60vh'}),
-                dcc.Graph(id='knocks-interactions-chart',
-                          style={'height': '60vh', 'marginTop': '24px'}),
+                html.Div([
+                    dcc.Graph(id='interaction-time-chart',
+                              style={'height': '40vh'}),
+                    dcc.Graph(id='knocks-interactions-chart',
+                              style={'height': '40vh'}),
+                    dcc.Graph(id='cumulative-chart',
+                              style={'height': '40vh'}),
+                    dcc.Graph(id='questionnaire-completion-chart',
+                              style={'height': '40vh'}),
+                ], style={
+                    'display': 'grid',
+                    'gridTemplateColumns': '1fr 1fr',
+                    'gap': '16px',
+                }),
             ],
             style={
                 'display': 'none',
