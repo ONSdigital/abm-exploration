@@ -146,6 +146,7 @@ class FieldWorkModel(mesa.Model):
         self.daily_interaction_time_pct = {}
         self.daily_knocks_by_day = {}
         self.daily_interactions_by_day = {}
+        self.daily_questionnaire_completion_pct = {}
         self.prev_day_lsoa_knocks_snapshot = {}
         self.prev_day_lsoa_interactions_snapshot = {}
         self.daily_target_lsoas = []
@@ -755,6 +756,16 @@ class FieldWorkModel(mesa.Model):
             self.daily_interactions_by_day[completed_day] = max(
                 0,
                 daily_total_interactions,
+            )
+
+            total_hh = sum(
+                s['total_households'] for s in self.lsoa_stats.values()
+            )
+            total_completions = sum(
+                s['questionnaire_completions'] for s in self.lsoa_stats.values()
+            )
+            self.daily_questionnaire_completion_pct[completed_day] = (
+                (total_completions / total_hh * 100) if total_hh > 0 else 0.0
             )
 
             self.prev_day_lsoa_knocks_snapshot = {

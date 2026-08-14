@@ -170,6 +170,8 @@ def create_layout(initial_fig):
             html.Button('⏸ Pause', id='pause-btn', n_clicks=0,
                         style={'marginRight': '8px'}),
             html.Button('↺ Reset', id='reset-btn', n_clicks=0),
+            html.Button('📊 View Results', id='view-results-btn', n_clicks=0,
+                        style={'marginLeft': '8px'}),
             html.Span('Step: 0 | Day 1 | 09:00:00', id='step-counter',
                       style={'marginLeft': '16px', 'fontFamily': 'monospace'}),
 
@@ -281,6 +283,22 @@ def create_layout(initial_fig):
                         html.Span('(applied at start of next day)',
                                   style={'fontSize': '0.8em',
                                          'color': '#555'}),
+                    ], style={'width': '220px', 'marginRight': '32px'}),
+
+                    # Simulation duration slider
+                    html.Div([
+                        html.Span('Simulation duration',
+                                  style={'fontWeight': 'bold'}),
+                        dcc.Slider(
+                            id='simulation-duration-slider',
+                            min=1, max=10, step=1, value=7,
+                            marks={1: '1', 5: '5', 10: '10'},
+                            tooltip={'placement': 'bottom',
+                                     'always_visible': False},
+                        ),
+                        html.Span('days',
+                                  style={'fontSize': '0.8em',
+                                         'color': '#555'}),
                     ], style={'width': '220px'}),
 
                 ], style={
@@ -355,4 +373,42 @@ def create_layout(initial_fig):
 
         # Store: currently selected choropleth metric ('knocks' or 'interactions')
         dcc.Store(id='metric-store', data='knocks'),
+
+        html.Div(
+            id='results-overlay',
+            children=[
+                html.Div([
+                    html.Span('Simulation Results',
+                              style={'fontWeight': 'bold', 'fontSize': '1.2em'}),
+                    html.Button('✕ Close', id='close-results-btn', n_clicks=0,
+                                style={'float': 'right', 'cursor': 'pointer'}),
+                ], style={'marginBottom': '12px', 'overflow': 'hidden'}),
+                html.Div([
+                    dcc.Graph(id='interaction-time-chart',
+                              style={'height': '40vh'}),
+                    dcc.Graph(id='knocks-interactions-chart',
+                              style={'height': '40vh'}),
+                    dcc.Graph(id='cumulative-chart',
+                              style={'height': '40vh'}),
+                    dcc.Graph(id='questionnaire-completion-chart',
+                              style={'height': '40vh'}),
+                ], style={
+                    'display': 'grid',
+                    'gridTemplateColumns': '1fr 1fr',
+                    'gap': '16px',
+                }),
+            ],
+            style={
+                'display': 'none',
+                'position': 'fixed',
+                'top': '5vh', 'left': '5vw',
+                'width': '90vw', 'height': '90vh',
+                'background': 'white',
+                'zIndex': 1000,
+                'padding': '20px',
+                'boxShadow': '0 4px 24px rgba(0,0,0,0.45)',
+                'overflowY': 'auto',
+                'borderRadius': '8px',
+            },
+        ),
     ])
