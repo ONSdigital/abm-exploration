@@ -131,10 +131,13 @@ def init_callbacks(app, state, viz_data):
         State('steps-per-tick-slider', 'value'),
         State('route-toggle', 'value'),
         State('simulation-duration-slider', 'value'),
+        State('field-staff-slider', 'value'),
+        State('daily-hh-per-agent-slider', 'value'),
         prevent_initial_call=True,
     )
     def tick(n_intervals, store, metric, choropleth_interval,
-             step_duration, steps_per_tick, route_toggle, max_days):
+             step_duration, steps_per_tick, route_toggle, max_days,
+             field_staff_slider_value, daily_hh_slider_value):
         """
         Advance the simulation by one step and patch:
           - Trace 1 (field staff) every step.
@@ -146,11 +149,16 @@ def init_callbacks(app, state, viz_data):
             return no_update, no_update, no_update
 
         model = state['model']
+
+        # Guard against the Dash race condition where the interval fires again
+        # before the browser receives and processes the updated run-store that
+        # a previous tick returned with running=False.
+        if max_days is not None and model.current_day > int(max_days):
+            store['running'] = False
+            return no_update, no_update, store
+
         store.setdefault('current_field_staff', len(model.field_staff))
-        store.setdefault('pending_field_staff', store['current_field_staff'])
         store.setdefault('current_daily_hh_per_agent', model.hh_per_agent)
-        store.setdefault('pending_daily_hh_per_agent',
-                 store['current_daily_hh_per_agent'])
 
         if step_duration is not None:
             model.simulation_step_seconds = step_duration
@@ -161,21 +169,20 @@ def init_callbacks(app, state, viz_data):
         steps_per_tick = int(steps_per_tick or 1)
         day_changed = False
         for _ in range(steps_per_tick):
+            if max_days is not None and model.current_day > int(max_days):
+                store['running'] = False
+                break
             day_before_step = model.current_day
             model.step()
 
             if model.current_day != day_before_step:
                 day_changed = True
-                pending_staff = int(store.get('pending_field_staff', 
-                                              len(model.field_staff)))
-                current_staff_count = int(store.get('current_field_staff', 
-                                                    len(model.field_staff)))
-                pending_daily_hh = int(
-                    store.get('pending_daily_hh_per_agent', model.hh_per_agent)
-                )
-                current_daily_hh = int(
-                    store.get('current_daily_hh_per_agent', model.hh_per_agent)
-                )
+                pending_staff = int(field_staff_slider_value or \
+                                    len(model.field_staff))
+                current_staff_count = len(model.field_staff)
+                pending_daily_hh = int(daily_hh_slider_value or \
+                                       model.hh_per_agent)
+                current_daily_hh = model.hh_per_agent
 
                 # Apply pending daily household target and staff count together
                 # at day rollover to keep day-level assignment changes coherent.
@@ -186,10 +193,6 @@ def init_callbacks(app, state, viz_data):
                 elif pending_daily_hh != current_daily_hh:
                     model.update_daily_target_lsoas()
                     model.assign_agents_to_target_lsoas()
-
-                if max_days is not None and model.current_day > int(max_days):
-                    store['running'] = False
-                    break
 
         store['step'] = model.steps
 

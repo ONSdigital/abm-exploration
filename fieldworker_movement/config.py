@@ -40,9 +40,9 @@ INTERACTION_COMPLETION_CHANCE = 0.8
 num_field_staff = 10  # Default number of field staff agents in the model.
 walking_speed = 1.4  # Average walking speed of agents in m/s
 driving_speed = 13.9  # Average driving speed of agents in m/s
-daily_hh_per_agent = 30 # No. of households an agent is told to visit daily
+daily_hh_per_agent = 50 # No. of households an agent is told to visit daily
 
-simulation_step_seconds = 30  # Simulated seconds advanced on each model step.
+simulation_step_seconds = 30  # Default sim seconds advanced on each model step.
 workday_start_hour = 9  # Simulated clock time when each workday begins.
 workday_duration_hours = 5  # Fieldwork hours completed before day rollover.
 dash_interval_ms = 500  # Real-time UI refresh cadence for simulation playback.
