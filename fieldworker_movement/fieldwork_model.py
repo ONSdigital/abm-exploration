@@ -20,6 +20,7 @@ from config import (
     ONGOING_COMPLETION_COLUMN,
     PATHS_FILEPATH,
     ROADS_FILEPATH,
+    daily_absence_rate,
     daily_hh_per_agent,
     simulation_step_seconds,
     walking_speed,
@@ -133,6 +134,7 @@ class FieldWorkModel(mesa.Model):
         )
         self.update_daily_target_lsoas()
         self.assign_agents_to_target_lsoas()
+        self._apply_daily_absences()
 
     def _reset_run_counters(self):
         """
@@ -147,11 +149,25 @@ class FieldWorkModel(mesa.Model):
         self.daily_knocks_by_day = {}
         self.daily_interactions_by_day = {}
         self.daily_questionnaire_completion_pct = {}
+        self.daily_attendance_pct = {}
         self.prev_day_lsoa_knocks_snapshot = {}
         self.prev_day_lsoa_interactions_snapshot = {}
         self.daily_target_lsoas = []
         self._prev_day = 1
         self._incomplete_nodes_cache = {}
+
+    def _apply_daily_absences(self):
+        """
+        Roll absence for each field worker. Called after daily assignment so
+        each agent already has an LSOA; absent agents simply won't work that day.
+        """
+        for agent in self.field_staff:
+            agent.absent_today = self.random.random() < daily_absence_rate
+        total = len(self.field_staff)
+        present = sum(1 for a in self.field_staff if not a.absent_today)
+        self.daily_attendance_pct[self.current_day] = (
+            present / total * 100 if total > 0 else 0.0
+        )
 
     def get_lsoa_completion_rates(self, lsoa_code):
         """
@@ -290,16 +306,17 @@ class FieldWorkModel(mesa.Model):
         -------
         lons, lats : tuple of lists
         """
+        active_staff = [agent for agent in self.field_staff if not agent.absent_today]
         display_positions = [
             getattr(agent, 'display_position', agent.node)
-            for agent in self.field_staff
+            for agent in active_staff
         ]
         eastings = [position[0] for position in display_positions]
         northings = [position[1] for position in display_positions]
         colors = [
             "#00aa44" if agent.has_knocked_all_assigned_households()
             else "#0a0001"
-            for agent in self.field_staff
+            for agent in active_staff
         ]
         lons, lats = to_wgs84(eastings, northings)
         return lons, lats, colors
@@ -639,6 +656,7 @@ class FieldWorkModel(mesa.Model):
         )
         self.update_daily_target_lsoas(target_count=target_count)
         self.assign_agents_to_target_lsoas()
+        self._apply_daily_absences()
 
     def reset(self, num_field_staff, hh_per_agent=None):
         """
@@ -707,6 +725,7 @@ class FieldWorkModel(mesa.Model):
         )
         self.update_daily_target_lsoas()
         self.assign_agents_to_target_lsoas()
+        self._apply_daily_absences()
 
     def step(self):
         """
@@ -781,4 +800,5 @@ class FieldWorkModel(mesa.Model):
 
             self.update_daily_target_lsoas()
             self.assign_agents_to_target_lsoas()
+            self._apply_daily_absences()
             self._prev_day = self.current_day

@@ -272,6 +272,7 @@ def init_callbacks(app, state, viz_data):
         Output('knocks-interactions-chart', 'figure'),
         Output('cumulative-chart', 'figure'),
         Output('questionnaire-completion-chart', 'figure'),
+        Output('attendance-chart', 'figure'),
         Input('view-results-btn', 'n_clicks'),
         Input('close-results-btn', 'n_clicks'),
         prevent_initial_call=True,
@@ -295,7 +296,8 @@ def init_callbacks(app, state, viz_data):
         _overlay_hidden = dict(_overlay_visible, display='none')
 
         if dash.callback_context.triggered_id == 'close-results-btn':
-            return _overlay_hidden, no_update, no_update, no_update, no_update
+            return _overlay_hidden, no_update, no_update, no_update, \
+                no_update, no_update
 
         model = state['model']
         data = model.daily_interaction_time_pct
@@ -307,7 +309,7 @@ def init_callbacks(app, state, viz_data):
                 yaxis_title='Interaction time (%)',
             )
             return _overlay_visible, empty_fig, go.Figure(), go.Figure(), \
-                    go.Figure()
+                    go.Figure(), go.Figure()
 
         days = sorted(data.keys())
         pcts = [data[d] for d in days]
@@ -449,7 +451,37 @@ def init_callbacks(app, state, viz_data):
             showlegend=False,
         )
 
-        return _overlay_visible, fig_time, fig_contacts, fig_cumulative, fig_completion
+        attendance_data = model.daily_attendance_pct
+        attendance_pcts = [attendance_data.get(d, 0) for d in days]
+        fig_attendance = go.Figure(go.Scatter(
+            x=day_labels,
+            y=attendance_pcts,
+            mode='lines+markers',
+            line={'color': 'steelblue'},
+            hovertemplate='%{x}<br>Attendance: %{y:.1f}%<extra></extra>',
+        ))
+        fig_attendance.update_layout(
+            title='Field staff attendance by day',
+            xaxis_title='Day',
+            yaxis_title='% staff present',
+            yaxis={
+                'range': [0, 100],
+                'showgrid': True,
+                'gridcolor': 'rgba(200, 200, 200, 0.4)',
+                'showline': True,
+                'linecolor': 'black',
+            },
+            xaxis={
+                'showgrid': False,
+                'showline': True,
+                'linecolor': 'black',
+            },
+            plot_bgcolor='white',
+            showlegend=False,
+        )
+
+        return _overlay_visible, fig_time, fig_contacts, fig_cumulative, \
+            fig_completion, fig_attendance
 
     @app.callback(
         Output('map', 'figure', allow_duplicate=True),

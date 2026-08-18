@@ -392,6 +392,8 @@ def create_layout(initial_fig):
                               style={'height': '40vh'}),
                     dcc.Graph(id='questionnaire-completion-chart',
                               style={'height': '40vh'}),
+                    dcc.Graph(id='attendance-chart',
+                              style={'height': '40vh'}),
                 ], style={
                     'display': 'grid',
                     'gridTemplateColumns': '1fr 1fr',
