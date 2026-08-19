@@ -762,7 +762,8 @@ class FieldWorkModel(mesa.Model):
         if self.current_day != self._prev_day:
             completed_day = day_before_step
             staff_capacity_seconds = (
-                len(self.field_staff) * self.workday_duration_seconds
+                sum(1 for a in self.field_staff if not a.absent_today)
+                * self.workday_duration_seconds
             )
             if staff_capacity_seconds > 0:
                 day_pct = (
