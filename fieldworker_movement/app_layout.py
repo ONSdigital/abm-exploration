@@ -229,8 +229,8 @@ def create_layout(initial_fig):
                                   style={'fontWeight': 'bold'}),
                         dcc.Slider(
                             id='steps-per-tick-slider',
-                            min=1, max=3600, step=50, value=100,
-                            marks={1: '1', 1800: '1800', 3600: '3600'},
+                            min=1, max=1000, step=50, value=400,
+                            marks={1: '1', 500: '500', 1000: '1000'},
                             tooltip={'placement': 'bottom', 
                                      'always_visible': False},
                         ),
@@ -275,8 +275,9 @@ def create_layout(initial_fig):
                                   style={'fontWeight': 'bold'}),
                         dcc.Slider(
                             id='daily-hh-per-agent-slider',
-                            min=1, max=100, step=1, value=daily_hh_per_agent,
-                            marks={1: '1', 20: '20', 40: '40', 60: '60', 80: '80'},
+                            min=1, max=200, step=1, value=daily_hh_per_agent,
+                            marks={1: '1', 50: '50', 100: '100', 150: '150', 
+                                   200: '200'},
                             tooltip={'placement': 'bottom',
                                      'always_visible': False},
                         ),
