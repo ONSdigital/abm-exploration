@@ -22,6 +22,7 @@ from config import (
     ROADS_FILEPATH,
     daily_absence_rate,
     daily_hh_per_agent,
+    non_compliant_agent_pct,
     simulation_step_seconds,
     walking_speed,
     workday_duration_hours,
@@ -132,6 +133,7 @@ class FieldWorkModel(mesa.Model):
             n=num_field_staff,
             node=[self.random.choice(self.node_list) for _ in range(num_field_staff)]
         )
+        self._assign_routing_types()
         self.update_daily_target_lsoas()
         self.assign_agents_to_target_lsoas()
         self._apply_daily_absences()
@@ -155,6 +157,18 @@ class FieldWorkModel(mesa.Model):
         self.daily_target_lsoas = []
         self._prev_day = 1
         self._incomplete_nodes_cache = {}
+
+    def _assign_routing_types(self):
+        """
+        Flag a fixed fraction of field staff as non-compliant (nearest-neighbour
+        routing) for the lifetime of the run. Called once after agents are
+        created or recreated, not on daily reassignment.
+        """
+        num_non_compliant = round(len(self.field_staff) * non_compliant_agent_pct)
+        non_compliant = self.random.sample(list(self.field_staff), num_non_compliant)
+        non_compliant_ids = {agent.unique_id for agent in non_compliant}
+        for agent in self.field_staff:
+            agent.use_nn_routing = agent.unique_id in non_compliant_ids
 
     def _apply_daily_absences(self):
         """
@@ -540,7 +554,10 @@ class FieldWorkModel(mesa.Model):
             for hh in assigned_households:
                 agent.node_to_pending_assigned.setdefault(hh.node, set()).add(hh)
             target_nodes = [household.node for household in assigned_households]
-            agent.vrp_waypoints = self._build_open_tsp_route(agent.node, target_nodes)
+            if agent.use_nn_routing:
+                agent.vrp_waypoints = []  # NN fallback in choose_target_node handles routing
+            else:
+                agent.vrp_waypoints = self._build_open_tsp_route(agent.node, target_nodes)
 
     def assign_agents_to_target_lsoas(self):
         """
@@ -654,6 +671,7 @@ class FieldWorkModel(mesa.Model):
                 for _ in range(target_count)
             ],
         )
+        self._assign_routing_types()
         self.update_daily_target_lsoas(target_count=target_count)
         self.assign_agents_to_target_lsoas()
         self._apply_daily_absences()
@@ -723,6 +741,7 @@ class FieldWorkModel(mesa.Model):
             n=num_field_staff,
             node=[self.random.choice(self.node_list) for _ in range(num_field_staff)]
         )
+        self._assign_routing_types()
         self.update_daily_target_lsoas()
         self.assign_agents_to_target_lsoas()
         self._apply_daily_absences()

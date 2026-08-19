@@ -95,6 +95,7 @@ class FieldWorker(mesa.Agent):
         self.node_to_pending_assigned = {}  # node -> set[Household] for pending households
         self.assigned_day = None  # Day when this agent was last assigned (for diagnostics)
         self.absent_today = False  # True if this agent is absent from work today
+        self.use_nn_routing = False  # True if this agent ignores the planned route and uses nearest-neighbour routing
 
     def has_pending_assigned_household_at_node(self, node):
         """

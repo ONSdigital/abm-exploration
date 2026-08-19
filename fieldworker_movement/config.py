@@ -50,6 +50,7 @@ dash_interval_ms = 500  # Real-time UI refresh cadence for simulation playback.
 hh_interaction_mean = 300  # Mean time for hh-staff interaction in seconds (5min).
 hh_interaction_std = 60  # Std of time for hh-staff interaction in seconds (1min).
 daily_absence_rate = 0.2  # Probability that any given field worker is absent on a given day.
+non_compliant_agent_pct = 0.10  # Fraction of field staff who ignore the planned route and use nearest-neighbour routing instead.
 
 
 #---------------------------CHOROPLETH METRICS---------------------------#
