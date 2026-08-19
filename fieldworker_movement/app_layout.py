@@ -313,47 +313,6 @@ def create_layout(initial_fig):
                 }),
             ], style={'marginLeft': '16px'}),
 
-            html.Details([
-                html.Summary('Daily Metrics', style={
-                    'cursor': 'pointer',
-                    'marginLeft': '24px',
-                    'fontWeight': 'bold',
-                    'userSelect': 'none',
-                }),
-                html.Div([
-                    html.Span('Show:', style={'fontWeight': 'bold',
-                                              'marginRight': '8px'}),
-                    dcc.Dropdown(
-                        id='daily-metric-radio',
-                        options=[
-                            {'label': 'Interaction Time %',
-                             'value': 'interaction_time_pct'},
-                            {'label': 'Households Knocked',
-                             'value': 'daily_knocks'},
-                            {'label': 'Households Interacted',
-                             'value': 'daily_interactions'},
-                        ],
-                        value='interaction_time_pct',
-                        clearable=False,
-                        style={'width': '280px', 'display': 'inline-block',
-                               'verticalAlign': 'middle'},
-                    ),
-                ], style={'padding': '12px 16px',
-                          'background': '#e4e4e4',
-                          'borderTop': '1px solid #ccc',
-                          'marginTop': '4px'}),
-                html.Div(
-                    id='daily-metric-breakdown',
-                    children='No completed days yet.',
-                    style={
-                        'padding': '12px 16px',
-                        'background': '#e4e4e4',
-                        'borderTop': '1px solid #ccc',
-                        'fontFamily': 'monospace',
-                    },
-                ),
-            ], style={'marginLeft': '16px'}),
-
         ], style={'padding': '8px', 'background': '#f0f0f0',
                   'display': 'flex', 'alignItems': 'center',
                   'flexWrap': 'wrap'}),

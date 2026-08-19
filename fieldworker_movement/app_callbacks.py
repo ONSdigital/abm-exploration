@@ -5,7 +5,7 @@ import dash
 import plotly.graph_objects as go
 from app_layout import _build_route_geometry, build_initial_figure
 from config import METRIC_METADATA, daily_hh_per_agent, num_field_staff
-from dash import Input, Output, Patch, State, html, no_update
+from dash import Input, Output, Patch, State, no_update
 
 
 def _pct(model, lsoa, metric):
@@ -37,8 +37,6 @@ def init_callbacks(app, state, viz_data):
     model instance even after a reset.
     """
     state.setdefault('last_reset_id', None)
-
-    _last_breakdown_state = [None]
 
     def _apply_choropleth(patched_fig, model, metric):
         meta = METRIC_METADATA.get(metric, METRIC_METADATA['knocks'])
@@ -230,43 +228,6 @@ def init_callbacks(app, state, viz_data):
         )
 
     @app.callback(
-        Output('daily-metric-breakdown', 'children'),
-        Input('interval', 'n_intervals'),
-        Input('reset-btn', 'n_clicks'),
-        Input('daily-metric-radio', 'value'),
-    )
-    def update_daily_metric_breakdown(_n_intervals, _reset_clicks, metric_type):
-        """
-        Render finalized end-of-day daily metrics.
-        """
-        metric_type = metric_type or 'interaction_time_pct'
-        model = state['model']
-
-        if metric_type == 'daily_knocks':
-            data = model.daily_knocks_by_day
-            formatter = lambda value: f'{int(value)} knocks'
-        elif metric_type == 'daily_interactions':
-            data = model.daily_interactions_by_day
-            formatter = lambda value: f'{int(value)} interactions'
-        else:
-            data = model.daily_interaction_time_pct
-            formatter = lambda value: f'{round(value)}%'
-
-        current_state = (metric_type, model.current_day, len(data))
-        if (dash.callback_context.triggered_id != 'reset-btn'
-                and current_state == _last_breakdown_state[0]):
-            return no_update
-        _last_breakdown_state[0] = current_state
-
-        if not data:
-            return 'No completed days yet.'
-
-        lines = []
-        for day in sorted(data):
-            lines.append(html.Div(f'Day {day}: {formatter(data[day])}'))
-        return lines
-
-    @app.callback(
         Output('results-overlay', 'style'),
         Output('interaction-time-chart', 'figure'),
         Output('knocks-interactions-chart', 'figure'),
@@ -324,7 +285,7 @@ def init_callbacks(app, state, viz_data):
             xaxis_title='Day',
             yaxis_title='Interaction time (%)',
             yaxis={
-                'range': [0, 100],
+                'range': [40, 100],
                 'showgrid': True,
                 'gridcolor': 'rgba(200, 200, 200, 0.4)',
                 'showline': True,
