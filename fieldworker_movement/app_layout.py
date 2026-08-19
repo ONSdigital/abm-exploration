@@ -199,6 +199,27 @@ def create_layout(initial_fig):
                 style={'display': 'inline-block'},
             ),
 
+            html.Span('  |  ', style={'marginLeft': '12px'}),
+            dcc.Checklist(
+                id='absence-toggle',
+                options=[{'label': ' Apply staff absences', 'value': 'on'}],
+                value=['on'],
+                inline=True,
+                style={'display': 'inline-block'},
+            ),
+
+            html.Span('  |  ', style={'marginLeft': '12px'}),
+            dcc.Checklist(
+                id='route-compliance-toggle',
+                options=[{
+                    'label': ' Apply route non-compliance',
+                    'value': 'on',
+                }],
+                value=['on'],
+                inline=True,
+                style={'display': 'inline-block'},
+            ),
+
             # Settings dropdown — sliders
             html.Details([
                 html.Summary('⚙ Settings', style={

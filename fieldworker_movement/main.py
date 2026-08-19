@@ -12,7 +12,11 @@ from config import LSOA_CODE_COLUMN, LSOAS_FILEPATH, num_field_staff
 from fieldwork_model import FieldWorkModel
 from mapping import load_lsoa_geojson, to_wgs84
 
-model = FieldWorkModel(num_field_staff=num_field_staff)
+model = FieldWorkModel(
+    num_field_staff=num_field_staff,
+    apply_daily_absences=True,
+    apply_route_non_compliance=True,
+)
 
 address_lons, address_lats = to_wgs84(
     model.gdf_addresses.geometry.x, model.gdf_addresses.geometry.y

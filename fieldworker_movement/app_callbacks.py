@@ -57,10 +57,14 @@ def init_callbacks(app, state, viz_data):
         State('daily-hh-per-agent-slider', 'value'),
         State('run-store', 'data'),
         State('step-duration-slider', 'value'),
+        State('absence-toggle', 'value'),
+        State('route-compliance-toggle', 'value'),
         prevent_initial_call=True,
     )
     def handle_controls(play_clicks, pause_clicks, reset_clicks,
-                        field_staff_value, daily_hh_value, store, step_duration):
+                        field_staff_value, daily_hh_value, store,
+                        step_duration, absence_toggle,
+                        route_compliance_toggle):
         """
         Toggle running state or reset the model.
         """
@@ -85,7 +89,14 @@ def init_callbacks(app, state, viz_data):
         elif triggered == 'reset-btn':
             selected_staff = int(field_staff_value or num_field_staff)
             selected_daily_hh = int(daily_hh_value or daily_hh_per_agent)
-            state['model'].reset(selected_staff, hh_per_agent=selected_daily_hh)
+            apply_daily_absences = bool(absence_toggle)
+            apply_route_non_compliance = bool(route_compliance_toggle)
+            state['model'].reset(
+                selected_staff,
+                hh_per_agent=selected_daily_hh,
+                apply_daily_absences=apply_daily_absences,
+                apply_route_non_compliance=apply_route_non_compliance,
+            )
             if step_duration is not None:
                 state['model'].simulation_step_seconds = step_duration
                 state['model'].travel_distance_per_step = (

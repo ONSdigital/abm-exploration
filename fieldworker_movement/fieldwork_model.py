@@ -46,13 +46,16 @@ class FieldWorkModel(mesa.Model):
     workers and the geographic area they operate within.
     """
 
-    def __init__(self, num_field_staff):
+    def __init__(self, num_field_staff, apply_daily_absences=True,
+                 apply_route_non_compliance=True):
         
         super().__init__()
 
         self.simulation_step_seconds = simulation_step_seconds
         self.walking_speed = walking_speed
         self.hh_per_agent = daily_hh_per_agent
+        self.apply_daily_absences = apply_daily_absences
+        self.apply_route_non_compliance = apply_route_non_compliance
         self.travel_distance_per_step = (
             self.walking_speed * self.simulation_step_seconds
         )
@@ -164,6 +167,11 @@ class FieldWorkModel(mesa.Model):
         routing) for the lifetime of the run. Called once after agents are
         created or recreated, not on daily reassignment.
         """
+        if not self.apply_route_non_compliance:
+            for agent in self.field_staff:
+                agent.use_nn_routing = False
+            return
+
         num_non_compliant = round(len(self.field_staff) * non_compliant_agent_pct)
         non_compliant = self.random.sample(list(self.field_staff), num_non_compliant)
         non_compliant_ids = {agent.unique_id for agent in non_compliant}
@@ -175,6 +183,15 @@ class FieldWorkModel(mesa.Model):
         Roll absence for each field worker. Called after daily assignment so
         each agent already has an LSOA; absent agents simply won't work that day.
         """
+        if not self.apply_daily_absences:
+            for agent in self.field_staff:
+                agent.absent_today = False
+            total = len(self.field_staff)
+            self.daily_attendance_pct[self.current_day] = (
+                100.0 if total > 0 else 0.0
+            )
+            return
+
         for agent in self.field_staff:
             agent.absent_today = self.random.random() < daily_absence_rate
         total = len(self.field_staff)
@@ -676,7 +693,9 @@ class FieldWorkModel(mesa.Model):
         self.assign_agents_to_target_lsoas()
         self._apply_daily_absences()
 
-    def reset(self, num_field_staff, hh_per_agent=None):
+    def reset(self, num_field_staff, hh_per_agent=None,
+              apply_daily_absences=True,
+              apply_route_non_compliance=True):
         """
         Reset the model to an initial state without reloading geographic data.
         Reuses the existing graph, addresses, LSOA geometry, and household
@@ -692,6 +711,8 @@ class FieldWorkModel(mesa.Model):
         """
         # Reset time / simulation state
         self._reset_run_counters()
+        self.apply_daily_absences = apply_daily_absences
+        self.apply_route_non_compliance = apply_route_non_compliance
 
         if hh_per_agent is not None:
             self.hh_per_agent = hh_per_agent
