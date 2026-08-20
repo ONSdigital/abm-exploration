@@ -307,6 +307,22 @@ def create_layout(initial_fig):
                                          'color': '#555'}),
                     ], style={'width': '220px', 'marginRight': '32px'}),
 
+                    # Re-visit buffer slider
+                    html.Div([
+                        html.Span('Re-visit buffer',
+                                  style={'fontWeight': 'bold'}),
+                        dcc.Slider(
+                            id='revisit-buffer-slider',
+                            min=0, max=14, step=1, value=3,
+                            marks={0: '0', 3: '3', 7: '7', 14: '14'},
+                            tooltip={'placement': 'bottom',
+                                     'always_visible': False},
+                        ),
+                        html.Span('days between re-visits (0 = off)',
+                                  style={'fontSize': '0.8em',
+                                         'color': '#555'}),
+                    ], style={'width': '220px', 'marginRight': '32px'}),
+
                     # Simulation duration slider
                     html.Div([
                         html.Span('Simulation duration',

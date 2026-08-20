@@ -59,12 +59,13 @@ def init_callbacks(app, state, viz_data):
         State('step-duration-slider', 'value'),
         State('absence-toggle', 'value'),
         State('route-compliance-toggle', 'value'),
+        State('revisit-buffer-slider', 'value'),
         prevent_initial_call=True,
     )
     def handle_controls(play_clicks, pause_clicks, reset_clicks,
                         field_staff_value, daily_hh_value, store,
                         step_duration, absence_toggle,
-                        route_compliance_toggle):
+                        route_compliance_toggle, revisit_buffer_value):
         """
         Toggle running state or reset the model.
         """
@@ -91,11 +92,14 @@ def init_callbacks(app, state, viz_data):
             selected_daily_hh = int(daily_hh_value or daily_hh_per_agent)
             apply_daily_absences = bool(absence_toggle)
             apply_route_non_compliance = bool(route_compliance_toggle)
+            revisit_buffer = int(revisit_buffer_value) if \
+                revisit_buffer_value is not None else 0
             state['model'].reset(
                 selected_staff,
                 hh_per_agent=selected_daily_hh,
                 apply_daily_absences=apply_daily_absences,
                 apply_route_non_compliance=apply_route_non_compliance,
+                revisit_buffer_days=revisit_buffer,
             )
             if step_duration is not None:
                 state['model'].simulation_step_seconds = step_duration

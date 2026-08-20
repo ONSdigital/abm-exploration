@@ -38,6 +38,7 @@ class Household(mesa.Agent):
         self.survey_completed = survey_completed
         self.completion_step = 0 if survey_completed else None
         self.completion_source = 'initial' if survey_completed else None
+        self.last_knocked_day = None
 
     def complete_survey(self, step_number, source):
         """
@@ -404,6 +405,7 @@ class FieldWorker(mesa.Agent):
         if not candidates:
             return
         household = self.random.choice(candidates)
+        household.last_knocked_day = self.model.current_day
         answered = self.knock(household)
         if answered:
             interaction_length = self.interaction(

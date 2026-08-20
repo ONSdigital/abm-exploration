@@ -47,7 +47,7 @@ class FieldWorkModel(mesa.Model):
     """
 
     def __init__(self, num_field_staff, apply_daily_absences=True,
-                 apply_route_non_compliance=True):
+                 apply_route_non_compliance=True, revisit_buffer_days=0):
         
         super().__init__()
 
@@ -56,6 +56,7 @@ class FieldWorkModel(mesa.Model):
         self.hh_per_agent = daily_hh_per_agent
         self.apply_daily_absences = apply_daily_absences
         self.apply_route_non_compliance = apply_route_non_compliance
+        self.revisit_buffer_days = revisit_buffer_days
         self.travel_distance_per_step = (
             self.walking_speed * self.simulation_step_seconds
         )
@@ -520,7 +521,15 @@ class FieldWorkModel(mesa.Model):
         if not agents:
             return
 
-        incomplete_households = self.get_incomplete_households_for_lsoa(lsoa_code)
+        all_incomplete = self.get_incomplete_households_for_lsoa(lsoa_code)
+        if self.revisit_buffer_days > 0:
+            incomplete_households = [
+                hh for hh in all_incomplete
+                if hh.last_knocked_day is None
+                or self.current_day - hh.last_knocked_day >= self.revisit_buffer_days
+            ]
+        else:
+            incomplete_households = all_incomplete
 
         for agent in agents:
             agent.clear_route()
@@ -695,7 +704,8 @@ class FieldWorkModel(mesa.Model):
 
     def reset(self, num_field_staff, hh_per_agent=None,
               apply_daily_absences=True,
-              apply_route_non_compliance=True):
+              apply_route_non_compliance=True,
+              revisit_buffer_days=None):
         """
         Reset the model to an initial state without reloading geographic data.
         Reuses the existing graph, addresses, LSOA geometry, and household
@@ -713,6 +723,8 @@ class FieldWorkModel(mesa.Model):
         self._reset_run_counters()
         self.apply_daily_absences = apply_daily_absences
         self.apply_route_non_compliance = apply_route_non_compliance
+        if revisit_buffer_days is not None:
+            self.revisit_buffer_days = revisit_buffer_days
 
         if hh_per_agent is not None:
             self.hh_per_agent = hh_per_agent
@@ -738,6 +750,7 @@ class FieldWorkModel(mesa.Model):
             household.survey_completed = survey_completed
             household.completion_step = 0 if survey_completed else None
             household.completion_source = 'initial' if survey_completed else None
+            household.last_knocked_day = None
             self.lsoa_stats[household.lsoa]['total_households'] += 1
             self.lsoa_stats[household.lsoa]['remaining_households'] += 1
             if survey_completed:
