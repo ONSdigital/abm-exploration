@@ -20,7 +20,9 @@ from config import (
     ONGOING_COMPLETION_COLUMN,
     PATHS_FILEPATH,
     ROADS_FILEPATH,
+    daily_absence_rate,
     daily_hh_per_agent,
+    non_compliant_agent_pct,
     simulation_step_seconds,
     walking_speed,
     workday_duration_hours,
@@ -44,13 +46,17 @@ class FieldWorkModel(mesa.Model):
     workers and the geographic area they operate within.
     """
 
-    def __init__(self, num_field_staff):
+    def __init__(self, num_field_staff, apply_daily_absences=True,
+                 apply_route_non_compliance=True, revisit_buffer_days=0):
         
         super().__init__()
 
         self.simulation_step_seconds = simulation_step_seconds
         self.walking_speed = walking_speed
         self.hh_per_agent = daily_hh_per_agent
+        self.apply_daily_absences = apply_daily_absences
+        self.apply_route_non_compliance = apply_route_non_compliance
+        self.revisit_buffer_days = revisit_buffer_days
         self.travel_distance_per_step = (
             self.walking_speed * self.simulation_step_seconds
         )
@@ -131,8 +137,10 @@ class FieldWorkModel(mesa.Model):
             n=num_field_staff,
             node=[self.random.choice(self.node_list) for _ in range(num_field_staff)]
         )
+        self._assign_routing_types()
         self.update_daily_target_lsoas()
         self.assign_agents_to_target_lsoas()
+        self._apply_daily_absences()
 
     def _reset_run_counters(self):
         """
@@ -147,11 +155,51 @@ class FieldWorkModel(mesa.Model):
         self.daily_knocks_by_day = {}
         self.daily_interactions_by_day = {}
         self.daily_questionnaire_completion_pct = {}
+        self.daily_attendance_pct = {}
         self.prev_day_lsoa_knocks_snapshot = {}
         self.prev_day_lsoa_interactions_snapshot = {}
         self.daily_target_lsoas = []
         self._prev_day = 1
         self._incomplete_nodes_cache = {}
+
+    def _assign_routing_types(self):
+        """
+        Flag a fixed fraction of field staff as non-compliant (nearest-neighbour
+        routing) for the lifetime of the run. Called once after agents are
+        created or recreated, not on daily reassignment.
+        """
+        if not self.apply_route_non_compliance:
+            for agent in self.field_staff:
+                agent.use_nn_routing = False
+            return
+
+        num_non_compliant = round(len(self.field_staff) * non_compliant_agent_pct)
+        non_compliant = self.random.sample(list(self.field_staff), num_non_compliant)
+        non_compliant_ids = {agent.unique_id for agent in non_compliant}
+        for agent in self.field_staff:
+            agent.use_nn_routing = agent.unique_id in non_compliant_ids
+
+    def _apply_daily_absences(self):
+        """
+        Roll absence for each field worker. Called after daily assignment so
+        each agent already has an LSOA; absent agents simply won't work that day.
+        """
+        if not self.apply_daily_absences:
+            for agent in self.field_staff:
+                agent.absent_today = False
+            total = len(self.field_staff)
+            self.daily_attendance_pct[self.current_day] = (
+                100.0 if total > 0 else 0.0
+            )
+            return
+
+        for agent in self.field_staff:
+            agent.absent_today = self.random.random() < daily_absence_rate
+        total = len(self.field_staff)
+        present = sum(1 for a in self.field_staff if not a.absent_today)
+        self.daily_attendance_pct[self.current_day] = (
+            present / total * 100 if total > 0 else 0.0
+        )
 
     def get_lsoa_completion_rates(self, lsoa_code):
         """
@@ -290,16 +338,17 @@ class FieldWorkModel(mesa.Model):
         -------
         lons, lats : tuple of lists
         """
+        active_staff = [agent for agent in self.field_staff if not agent.absent_today]
         display_positions = [
             getattr(agent, 'display_position', agent.node)
-            for agent in self.field_staff
+            for agent in active_staff
         ]
         eastings = [position[0] for position in display_positions]
         northings = [position[1] for position in display_positions]
         colors = [
             "#00aa44" if agent.has_knocked_all_assigned_households()
             else "#0a0001"
-            for agent in self.field_staff
+            for agent in active_staff
         ]
         lons, lats = to_wgs84(eastings, northings)
         return lons, lats, colors
@@ -472,7 +521,15 @@ class FieldWorkModel(mesa.Model):
         if not agents:
             return
 
-        incomplete_households = self.get_incomplete_households_for_lsoa(lsoa_code)
+        all_incomplete = self.get_incomplete_households_for_lsoa(lsoa_code)
+        if self.revisit_buffer_days > 0:
+            incomplete_households = [
+                hh for hh in all_incomplete
+                if hh.last_knocked_day is None
+                or self.current_day - hh.last_knocked_day >= self.revisit_buffer_days
+            ]
+        else:
+            incomplete_households = all_incomplete
 
         for agent in agents:
             agent.clear_route()
@@ -523,7 +580,10 @@ class FieldWorkModel(mesa.Model):
             for hh in assigned_households:
                 agent.node_to_pending_assigned.setdefault(hh.node, set()).add(hh)
             target_nodes = [household.node for household in assigned_households]
-            agent.vrp_waypoints = self._build_open_tsp_route(agent.node, target_nodes)
+            if agent.use_nn_routing:
+                agent.vrp_waypoints = []  # NN fallback in choose_target_node handles routing
+            else:
+                agent.vrp_waypoints = self._build_open_tsp_route(agent.node, target_nodes)
 
     def assign_agents_to_target_lsoas(self):
         """
@@ -637,10 +697,15 @@ class FieldWorkModel(mesa.Model):
                 for _ in range(target_count)
             ],
         )
+        self._assign_routing_types()
         self.update_daily_target_lsoas(target_count=target_count)
         self.assign_agents_to_target_lsoas()
+        self._apply_daily_absences()
 
-    def reset(self, num_field_staff, hh_per_agent=None):
+    def reset(self, num_field_staff, hh_per_agent=None,
+              apply_daily_absences=True,
+              apply_route_non_compliance=True,
+              revisit_buffer_days=None):
         """
         Reset the model to an initial state without reloading geographic data.
         Reuses the existing graph, addresses, LSOA geometry, and household
@@ -656,6 +721,10 @@ class FieldWorkModel(mesa.Model):
         """
         # Reset time / simulation state
         self._reset_run_counters()
+        self.apply_daily_absences = apply_daily_absences
+        self.apply_route_non_compliance = apply_route_non_compliance
+        if revisit_buffer_days is not None:
+            self.revisit_buffer_days = revisit_buffer_days
 
         if hh_per_agent is not None:
             self.hh_per_agent = hh_per_agent
@@ -681,6 +750,7 @@ class FieldWorkModel(mesa.Model):
             household.survey_completed = survey_completed
             household.completion_step = 0 if survey_completed else None
             household.completion_source = 'initial' if survey_completed else None
+            household.last_knocked_day = None
             self.lsoa_stats[household.lsoa]['total_households'] += 1
             self.lsoa_stats[household.lsoa]['remaining_households'] += 1
             if survey_completed:
@@ -705,8 +775,10 @@ class FieldWorkModel(mesa.Model):
             n=num_field_staff,
             node=[self.random.choice(self.node_list) for _ in range(num_field_staff)]
         )
+        self._assign_routing_types()
         self.update_daily_target_lsoas()
         self.assign_agents_to_target_lsoas()
+        self._apply_daily_absences()
 
     def step(self):
         """
@@ -724,7 +796,8 @@ class FieldWorkModel(mesa.Model):
         if self.current_day != self._prev_day:
             completed_day = day_before_step
             staff_capacity_seconds = (
-                len(self.field_staff) * self.workday_duration_seconds
+                sum(1 for a in self.field_staff if not a.absent_today)
+                * self.workday_duration_seconds
             )
             if staff_capacity_seconds > 0:
                 day_pct = (
@@ -781,4 +854,5 @@ class FieldWorkModel(mesa.Model):
 
             self.update_daily_target_lsoas()
             self.assign_agents_to_target_lsoas()
+            self._apply_daily_absences()
             self._prev_day = self.current_day

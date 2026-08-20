@@ -37,18 +37,20 @@ INTERACTION_COMPLETION_CHANCE = 0.8
 
 #-----------------------------MODEL PARAMETERS----------------------------#
 
-num_field_staff = 10  # Default number of field staff agents in the model.
+num_field_staff = 30  # Default number of field staff agents in the model.
 walking_speed = 1.4  # Average walking speed of agents in m/s
 driving_speed = 13.9  # Average driving speed of agents in m/s
-daily_hh_per_agent = 30 # No. of households an agent is told to visit daily
+daily_hh_per_agent = 50 # No. of households an agent is told to visit daily
 
-simulation_step_seconds = 30  # Simulated seconds advanced on each model step.
+simulation_step_seconds = 1  # Default sim seconds advanced on each model step.
 workday_start_hour = 9  # Simulated clock time when each workday begins.
 workday_duration_hours = 5  # Fieldwork hours completed before day rollover.
 dash_interval_ms = 500  # Real-time UI refresh cadence for simulation playback.
 
 hh_interaction_mean = 300  # Mean time for hh-staff interaction in seconds (5min).
 hh_interaction_std = 60  # Std of time for hh-staff interaction in seconds (1min).
+daily_absence_rate = 0.2  # Probability that any given field worker is absent on a given day.
+non_compliant_agent_pct = 0.10  # Fraction of field staff who ignore the planned route and use nearest-neighbour routing instead.
 
 
 #---------------------------CHOROPLETH METRICS---------------------------#

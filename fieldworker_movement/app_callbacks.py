@@ -5,7 +5,7 @@ import dash
 import plotly.graph_objects as go
 from app_layout import _build_route_geometry, build_initial_figure
 from config import METRIC_METADATA, daily_hh_per_agent, num_field_staff
-from dash import Input, Output, Patch, State, html, no_update
+from dash import Input, Output, Patch, State, no_update
 
 
 def _pct(model, lsoa, metric):
@@ -38,8 +38,6 @@ def init_callbacks(app, state, viz_data):
     """
     state.setdefault('last_reset_id', None)
 
-    _last_breakdown_state = [None]
-
     def _apply_choropleth(patched_fig, model, metric):
         meta = METRIC_METADATA.get(metric, METRIC_METADATA['knocks'])
         patched_fig['data'][3]['z'] = [
@@ -59,10 +57,15 @@ def init_callbacks(app, state, viz_data):
         State('daily-hh-per-agent-slider', 'value'),
         State('run-store', 'data'),
         State('step-duration-slider', 'value'),
+        State('absence-toggle', 'value'),
+        State('route-compliance-toggle', 'value'),
+        State('revisit-buffer-slider', 'value'),
         prevent_initial_call=True,
     )
     def handle_controls(play_clicks, pause_clicks, reset_clicks,
-                        field_staff_value, daily_hh_value, store, step_duration):
+                        field_staff_value, daily_hh_value, store,
+                        step_duration, absence_toggle,
+                        route_compliance_toggle, revisit_buffer_value):
         """
         Toggle running state or reset the model.
         """
@@ -87,7 +90,17 @@ def init_callbacks(app, state, viz_data):
         elif triggered == 'reset-btn':
             selected_staff = int(field_staff_value or num_field_staff)
             selected_daily_hh = int(daily_hh_value or daily_hh_per_agent)
-            state['model'].reset(selected_staff, hh_per_agent=selected_daily_hh)
+            apply_daily_absences = bool(absence_toggle)
+            apply_route_non_compliance = bool(route_compliance_toggle)
+            revisit_buffer = int(revisit_buffer_value) if \
+                revisit_buffer_value is not None else 0
+            state['model'].reset(
+                selected_staff,
+                hh_per_agent=selected_daily_hh,
+                apply_daily_absences=apply_daily_absences,
+                apply_route_non_compliance=apply_route_non_compliance,
+                revisit_buffer_days=revisit_buffer,
+            )
             if step_duration is not None:
                 state['model'].simulation_step_seconds = step_duration
                 state['model'].travel_distance_per_step = (
@@ -131,10 +144,13 @@ def init_callbacks(app, state, viz_data):
         State('steps-per-tick-slider', 'value'),
         State('route-toggle', 'value'),
         State('simulation-duration-slider', 'value'),
+        State('field-staff-slider', 'value'),
+        State('daily-hh-per-agent-slider', 'value'),
         prevent_initial_call=True,
     )
     def tick(n_intervals, store, metric, choropleth_interval,
-             step_duration, steps_per_tick, route_toggle, max_days):
+             step_duration, steps_per_tick, route_toggle, max_days,
+             field_staff_slider_value, daily_hh_slider_value):
         """
         Advance the simulation by one step and patch:
           - Trace 1 (field staff) every step.
@@ -146,11 +162,16 @@ def init_callbacks(app, state, viz_data):
             return no_update, no_update, no_update
 
         model = state['model']
+
+        # Guard against the Dash race condition where the interval fires again
+        # before the browser receives and processes the updated run-store that
+        # a previous tick returned with running=False.
+        if max_days is not None and model.current_day > int(max_days):
+            store['running'] = False
+            return no_update, no_update, store
+
         store.setdefault('current_field_staff', len(model.field_staff))
-        store.setdefault('pending_field_staff', store['current_field_staff'])
         store.setdefault('current_daily_hh_per_agent', model.hh_per_agent)
-        store.setdefault('pending_daily_hh_per_agent',
-                 store['current_daily_hh_per_agent'])
 
         if step_duration is not None:
             model.simulation_step_seconds = step_duration
@@ -161,21 +182,20 @@ def init_callbacks(app, state, viz_data):
         steps_per_tick = int(steps_per_tick or 1)
         day_changed = False
         for _ in range(steps_per_tick):
+            if max_days is not None and model.current_day > int(max_days):
+                store['running'] = False
+                break
             day_before_step = model.current_day
             model.step()
 
             if model.current_day != day_before_step:
                 day_changed = True
-                pending_staff = int(store.get('pending_field_staff', 
-                                              len(model.field_staff)))
-                current_staff_count = int(store.get('current_field_staff', 
-                                                    len(model.field_staff)))
-                pending_daily_hh = int(
-                    store.get('pending_daily_hh_per_agent', model.hh_per_agent)
-                )
-                current_daily_hh = int(
-                    store.get('current_daily_hh_per_agent', model.hh_per_agent)
-                )
+                pending_staff = int(field_staff_slider_value or \
+                                    len(model.field_staff))
+                current_staff_count = len(model.field_staff)
+                pending_daily_hh = int(daily_hh_slider_value or \
+                                       model.hh_per_agent)
+                current_daily_hh = model.hh_per_agent
 
                 # Apply pending daily household target and staff count together
                 # at day rollover to keep day-level assignment changes coherent.
@@ -186,10 +206,6 @@ def init_callbacks(app, state, viz_data):
                 elif pending_daily_hh != current_daily_hh:
                     model.update_daily_target_lsoas()
                     model.assign_agents_to_target_lsoas()
-
-                if max_days is not None and model.current_day > int(max_days):
-                    store['running'] = False
-                    break
 
         store['step'] = model.steps
 
@@ -227,48 +243,12 @@ def init_callbacks(app, state, viz_data):
         )
 
     @app.callback(
-        Output('daily-metric-breakdown', 'children'),
-        Input('interval', 'n_intervals'),
-        Input('reset-btn', 'n_clicks'),
-        Input('daily-metric-radio', 'value'),
-    )
-    def update_daily_metric_breakdown(_n_intervals, _reset_clicks, metric_type):
-        """
-        Render finalized end-of-day daily metrics.
-        """
-        metric_type = metric_type or 'interaction_time_pct'
-        model = state['model']
-
-        if metric_type == 'daily_knocks':
-            data = model.daily_knocks_by_day
-            formatter = lambda value: f'{int(value)} knocks'
-        elif metric_type == 'daily_interactions':
-            data = model.daily_interactions_by_day
-            formatter = lambda value: f'{int(value)} interactions'
-        else:
-            data = model.daily_interaction_time_pct
-            formatter = lambda value: f'{round(value)}%'
-
-        current_state = (metric_type, model.current_day, len(data))
-        if (dash.callback_context.triggered_id != 'reset-btn'
-                and current_state == _last_breakdown_state[0]):
-            return no_update
-        _last_breakdown_state[0] = current_state
-
-        if not data:
-            return 'No completed days yet.'
-
-        lines = []
-        for day in sorted(data):
-            lines.append(html.Div(f'Day {day}: {formatter(data[day])}'))
-        return lines
-
-    @app.callback(
         Output('results-overlay', 'style'),
         Output('interaction-time-chart', 'figure'),
         Output('knocks-interactions-chart', 'figure'),
         Output('cumulative-chart', 'figure'),
         Output('questionnaire-completion-chart', 'figure'),
+        Output('attendance-chart', 'figure'),
         Input('view-results-btn', 'n_clicks'),
         Input('close-results-btn', 'n_clicks'),
         prevent_initial_call=True,
@@ -292,7 +272,8 @@ def init_callbacks(app, state, viz_data):
         _overlay_hidden = dict(_overlay_visible, display='none')
 
         if dash.callback_context.triggered_id == 'close-results-btn':
-            return _overlay_hidden, no_update, no_update, no_update, no_update
+            return _overlay_hidden, no_update, no_update, no_update, \
+                no_update, no_update
 
         model = state['model']
         data = model.daily_interaction_time_pct
@@ -304,7 +285,7 @@ def init_callbacks(app, state, viz_data):
                 yaxis_title='Interaction time (%)',
             )
             return _overlay_visible, empty_fig, go.Figure(), go.Figure(), \
-                    go.Figure()
+                    go.Figure(), go.Figure()
 
         days = sorted(data.keys())
         pcts = [data[d] for d in days]
@@ -319,7 +300,7 @@ def init_callbacks(app, state, viz_data):
             xaxis_title='Day',
             yaxis_title='Interaction time (%)',
             yaxis={
-                'range': [0, 100],
+                'range': [40, 100],
                 'showgrid': True,
                 'gridcolor': 'rgba(200, 200, 200, 0.4)',
                 'showline': True,
@@ -446,7 +427,37 @@ def init_callbacks(app, state, viz_data):
             showlegend=False,
         )
 
-        return _overlay_visible, fig_time, fig_contacts, fig_cumulative, fig_completion
+        attendance_data = model.daily_attendance_pct
+        attendance_pcts = [attendance_data.get(d, 0) for d in days]
+        fig_attendance = go.Figure(go.Scatter(
+            x=day_labels,
+            y=attendance_pcts,
+            mode='lines+markers',
+            line={'color': 'steelblue'},
+            hovertemplate='%{x}<br>Attendance: %{y:.1f}%<extra></extra>',
+        ))
+        fig_attendance.update_layout(
+            title='Field staff attendance by day',
+            xaxis_title='Day',
+            yaxis_title='% staff present',
+            yaxis={
+                'range': [0, 100],
+                'showgrid': True,
+                'gridcolor': 'rgba(200, 200, 200, 0.4)',
+                'showline': True,
+                'linecolor': 'black',
+            },
+            xaxis={
+                'showgrid': False,
+                'showline': True,
+                'linecolor': 'black',
+            },
+            plot_bgcolor='white',
+            showlegend=False,
+        )
+
+        return _overlay_visible, fig_time, fig_contacts, fig_cumulative, \
+            fig_completion, fig_attendance
 
     @app.callback(
         Output('map', 'figure', allow_duplicate=True),

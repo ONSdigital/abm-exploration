@@ -38,6 +38,7 @@ class Household(mesa.Agent):
         self.survey_completed = survey_completed
         self.completion_step = 0 if survey_completed else None
         self.completion_source = 'initial' if survey_completed else None
+        self.last_knocked_day = None
 
     def complete_survey(self, step_number, source):
         """
@@ -94,6 +95,8 @@ class FieldWorker(mesa.Agent):
         self.pending_assigned_households = set()  # Assigned households not yet knocked (O(1) lookup)
         self.node_to_pending_assigned = {}  # node -> set[Household] for pending households
         self.assigned_day = None  # Day when this agent was last assigned (for diagnostics)
+        self.absent_today = False  # True if this agent is absent from work today
+        self.use_nn_routing = False  # True if this agent ignores the planned route and uses nearest-neighbour routing
 
     def has_pending_assigned_household_at_node(self, node):
         """
@@ -402,6 +405,7 @@ class FieldWorker(mesa.Agent):
         if not candidates:
             return
         household = self.random.choice(candidates)
+        household.last_knocked_day = self.model.current_day
         answered = self.knock(household)
         if answered:
             interaction_length = self.interaction(
@@ -430,6 +434,9 @@ class FieldWorker(mesa.Agent):
         One step for each field staff agent in the simulation. Acknowledges if 
         an interaction with a household is in progress.
         """
+        if self.absent_today:
+            return
+
         if self.busy_time_remaining_seconds > 0:
             self.busy_time_remaining_seconds = max(
                 0.0,

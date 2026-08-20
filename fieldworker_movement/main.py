@@ -8,11 +8,15 @@ Aaron Stace, 03/07/2026
 import dash
 from app_callbacks import init_callbacks
 from app_layout import build_initial_figure, create_layout
-from config import LSOA_CODE_COLUMN, LSOAS_FILEPATH
+from config import LSOA_CODE_COLUMN, LSOAS_FILEPATH, num_field_staff
 from fieldwork_model import FieldWorkModel
 from mapping import load_lsoa_geojson, to_wgs84
 
-model = FieldWorkModel(num_field_staff=10)
+model = FieldWorkModel(
+    num_field_staff=num_field_staff,
+    apply_daily_absences=True,
+    apply_route_non_compliance=True,
+)
 
 address_lons, address_lats = to_wgs84(
     model.gdf_addresses.geometry.x, model.gdf_addresses.geometry.y

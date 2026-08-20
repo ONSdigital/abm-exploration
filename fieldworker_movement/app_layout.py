@@ -199,6 +199,27 @@ def create_layout(initial_fig):
                 style={'display': 'inline-block'},
             ),
 
+            html.Span('  |  ', style={'marginLeft': '12px'}),
+            dcc.Checklist(
+                id='absence-toggle',
+                options=[{'label': ' Apply staff absences', 'value': 'on'}],
+                value=['on'],
+                inline=True,
+                style={'display': 'inline-block'},
+            ),
+
+            html.Span('  |  ', style={'marginLeft': '12px'}),
+            dcc.Checklist(
+                id='route-compliance-toggle',
+                options=[{
+                    'label': ' Apply route non-compliance',
+                    'value': 'on',
+                }],
+                value=['on'],
+                inline=True,
+                style={'display': 'inline-block'},
+            ),
+
             # Settings dropdown — sliders
             html.Details([
                 html.Summary('⚙ Settings', style={
@@ -229,8 +250,8 @@ def create_layout(initial_fig):
                                   style={'fontWeight': 'bold'}),
                         dcc.Slider(
                             id='steps-per-tick-slider',
-                            min=1, max=3600, step=50, value=100,
-                            marks={1: '1', 1800: '1800', 3600: '3600'},
+                            min=1, max=1000, step=50, value=400,
+                            marks={1: '1', 500: '500', 1000: '1000'},
                             tooltip={'placement': 'bottom', 
                                      'always_visible': False},
                         ),
@@ -275,12 +296,29 @@ def create_layout(initial_fig):
                                   style={'fontWeight': 'bold'}),
                         dcc.Slider(
                             id='daily-hh-per-agent-slider',
-                            min=1, max=100, step=1, value=daily_hh_per_agent,
-                            marks={1: '1', 20: '20', 40: '40', 60: '60', 80: '80'},
+                            min=1, max=200, step=1, value=daily_hh_per_agent,
+                            marks={1: '1', 50: '50', 100: '100', 150: '150', 
+                                   200: '200'},
                             tooltip={'placement': 'bottom',
                                      'always_visible': False},
                         ),
                         html.Span('(applied at start of next day)',
+                                  style={'fontSize': '0.8em',
+                                         'color': '#555'}),
+                    ], style={'width': '220px', 'marginRight': '32px'}),
+
+                    # Re-visit buffer slider
+                    html.Div([
+                        html.Span('Re-visit buffer',
+                                  style={'fontWeight': 'bold'}),
+                        dcc.Slider(
+                            id='revisit-buffer-slider',
+                            min=0, max=14, step=1, value=3,
+                            marks={0: '0', 3: '3', 7: '7', 14: '14'},
+                            tooltip={'placement': 'bottom',
+                                     'always_visible': False},
+                        ),
+                        html.Span('days between re-visits (0 = off)',
                                   style={'fontSize': '0.8em',
                                          'color': '#555'}),
                     ], style={'width': '220px', 'marginRight': '32px'}),
@@ -310,47 +348,6 @@ def create_layout(initial_fig):
                     'borderTop': '1px solid #ccc',
                     'marginTop': '4px',
                 }),
-            ], style={'marginLeft': '16px'}),
-
-            html.Details([
-                html.Summary('Daily Metrics', style={
-                    'cursor': 'pointer',
-                    'marginLeft': '24px',
-                    'fontWeight': 'bold',
-                    'userSelect': 'none',
-                }),
-                html.Div([
-                    html.Span('Show:', style={'fontWeight': 'bold',
-                                              'marginRight': '8px'}),
-                    dcc.Dropdown(
-                        id='daily-metric-radio',
-                        options=[
-                            {'label': 'Interaction Time %',
-                             'value': 'interaction_time_pct'},
-                            {'label': 'Households Knocked',
-                             'value': 'daily_knocks'},
-                            {'label': 'Households Interacted',
-                             'value': 'daily_interactions'},
-                        ],
-                        value='interaction_time_pct',
-                        clearable=False,
-                        style={'width': '280px', 'display': 'inline-block',
-                               'verticalAlign': 'middle'},
-                    ),
-                ], style={'padding': '12px 16px',
-                          'background': '#e4e4e4',
-                          'borderTop': '1px solid #ccc',
-                          'marginTop': '4px'}),
-                html.Div(
-                    id='daily-metric-breakdown',
-                    children='No completed days yet.',
-                    style={
-                        'padding': '12px 16px',
-                        'background': '#e4e4e4',
-                        'borderTop': '1px solid #ccc',
-                        'fontFamily': 'monospace',
-                    },
-                ),
             ], style={'marginLeft': '16px'}),
 
         ], style={'padding': '8px', 'background': '#f0f0f0',
@@ -391,6 +388,8 @@ def create_layout(initial_fig):
                     dcc.Graph(id='cumulative-chart',
                               style={'height': '40vh'}),
                     dcc.Graph(id='questionnaire-completion-chart',
+                              style={'height': '40vh'}),
+                    dcc.Graph(id='attendance-chart',
                               style={'height': '40vh'}),
                 ], style={
                     'display': 'grid',
