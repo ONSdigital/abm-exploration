@@ -220,6 +220,18 @@ def create_layout(initial_fig):
                 style={'display': 'inline-block'},
             ),
 
+            html.Span('  |  ', style={'marginLeft': '12px'}),
+            dcc.Checklist(
+                id='homeward-revisit-toggle',
+                options=[{
+                    'label': ' Apply journey home revisits',
+                    'value': 'on',
+                }],
+                value=['on'],
+                inline=True,
+                style={'display': 'inline-block'},
+            ),
+
             # Settings dropdown — sliders
             html.Details([
                 html.Summary('⚙ Settings', style={
@@ -390,6 +402,8 @@ def create_layout(initial_fig):
                     dcc.Graph(id='questionnaire-completion-chart',
                               style={'height': '40vh'}),
                     dcc.Graph(id='attendance-chart',
+                              style={'height': '40vh'}),
+                    dcc.Graph(id='multi-visits-chart',
                               style={'height': '40vh'}),
                 ], style={
                     'display': 'grid',

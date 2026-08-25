@@ -22,6 +22,7 @@ from config import (
     ROADS_FILEPATH,
     daily_absence_rate,
     daily_hh_per_agent,
+    homeward_revisit_agent_pct,
     non_compliant_agent_pct,
     simulation_step_seconds,
     walking_speed,
@@ -47,7 +48,8 @@ class FieldWorkModel(mesa.Model):
     """
 
     def __init__(self, num_field_staff, apply_daily_absences=True,
-                 apply_route_non_compliance=True, revisit_buffer_days=0):
+                 apply_route_non_compliance=True, revisit_buffer_days=0,
+                 apply_homeward_revisits=True):
         
         super().__init__()
 
@@ -57,6 +59,7 @@ class FieldWorkModel(mesa.Model):
         self.apply_daily_absences = apply_daily_absences
         self.apply_route_non_compliance = apply_route_non_compliance
         self.revisit_buffer_days = revisit_buffer_days
+        self.apply_homeward_revisits = apply_homeward_revisits
         self.travel_distance_per_step = (
             self.walking_speed * self.simulation_step_seconds
         )
@@ -138,6 +141,7 @@ class FieldWorkModel(mesa.Model):
             node=[self.random.choice(self.node_list) for _ in range(num_field_staff)]
         )
         self._assign_routing_types()
+        self._assign_homeward_revisit_types()
         self.update_daily_target_lsoas()
         self.assign_agents_to_target_lsoas()
         self._apply_daily_absences()
@@ -156,11 +160,14 @@ class FieldWorkModel(mesa.Model):
         self.daily_interactions_by_day = {}
         self.daily_questionnaire_completion_pct = {}
         self.daily_attendance_pct = {}
+        self.daily_multi_visits_by_day = {}
         self.prev_day_lsoa_knocks_snapshot = {}
         self.prev_day_lsoa_interactions_snapshot = {}
         self.daily_target_lsoas = []
         self._prev_day = 1
         self._incomplete_nodes_cache = {}
+        self._home_phase = False
+        self._current_day_multi_visits = 0
 
     def _assign_routing_types(self):
         """
@@ -178,6 +185,24 @@ class FieldWorkModel(mesa.Model):
         non_compliant_ids = {agent.unique_id for agent in non_compliant}
         for agent in self.field_staff:
             agent.use_nn_routing = agent.unique_id in non_compliant_ids
+
+    def _assign_homeward_revisit_types(self):
+        """
+        Flag a fixed fraction of field staff as homeward-revisit-prone for the
+        lifetime of the run. Prone agents re-knock non-answered households
+        within homeward_revisit_radius metres of their route home.
+        Called once after agents are created or recreated.
+        """
+        if not self.apply_homeward_revisits:
+            for agent in self.field_staff:
+                agent.homeward_revisit_prone = False
+            return
+
+        num_prone = round(len(self.field_staff) * homeward_revisit_agent_pct)
+        prone = self.random.sample(list(self.field_staff), num_prone)
+        prone_ids = {agent.unique_id for agent in prone}
+        for agent in self.field_staff:
+            agent.homeward_revisit_prone = agent.unique_id in prone_ids
 
     def _apply_daily_absences(self):
         """
@@ -535,6 +560,7 @@ class FieldWorkModel(mesa.Model):
             agent.clear_route()
             agent.vrp_waypoint_index = 0
             agent.households_knocked = set()
+            agent.households_interacted = set()
             agent.pending_assigned_households = set()
             agent.node_to_pending_assigned = {}
 
@@ -584,6 +610,17 @@ class FieldWorkModel(mesa.Model):
                 agent.vrp_waypoints = []  # NN fallback in choose_target_node handles routing
             else:
                 agent.vrp_waypoints = self._build_open_tsp_route(agent.node, target_nodes)
+
+            # Assign a random home address in the same LSOA for end-of-day routing.
+            lsoa_households = self.lsoa_to_households.get(lsoa_code, [])
+            unvisited = [hh for hh in lsoa_households if hh not in agent.households_knocked]
+            if unvisited:
+                agent.home_node = self.random.choice(unvisited).node
+            elif lsoa_households:
+                agent.home_node = self.random.choice(lsoa_households).node
+            else:
+                agent.home_node = agent.node
+            agent.going_home = False
 
     def assign_agents_to_target_lsoas(self):
         """
@@ -698,6 +735,7 @@ class FieldWorkModel(mesa.Model):
             ],
         )
         self._assign_routing_types()
+        self._assign_homeward_revisit_types()
         self.update_daily_target_lsoas(target_count=target_count)
         self.assign_agents_to_target_lsoas()
         self._apply_daily_absences()
@@ -705,7 +743,8 @@ class FieldWorkModel(mesa.Model):
     def reset(self, num_field_staff, hh_per_agent=None,
               apply_daily_absences=True,
               apply_route_non_compliance=True,
-              revisit_buffer_days=None):
+              revisit_buffer_days=None,
+              apply_homeward_revisits=True):
         """
         Reset the model to an initial state without reloading geographic data.
         Reuses the existing graph, addresses, LSOA geometry, and household
@@ -723,6 +762,7 @@ class FieldWorkModel(mesa.Model):
         self._reset_run_counters()
         self.apply_daily_absences = apply_daily_absences
         self.apply_route_non_compliance = apply_route_non_compliance
+        self.apply_homeward_revisits = apply_homeward_revisits
         if revisit_buffer_days is not None:
             self.revisit_buffer_days = revisit_buffer_days
 
@@ -776,6 +816,7 @@ class FieldWorkModel(mesa.Model):
             node=[self.random.choice(self.node_list) for _ in range(num_field_staff)]
         )
         self._assign_routing_types()
+        self._assign_homeward_revisit_types()
         self.update_daily_target_lsoas()
         self.assign_agents_to_target_lsoas()
         self._apply_daily_absences()
@@ -787,10 +828,32 @@ class FieldWorkModel(mesa.Model):
         super().step()
         day_before_step = self.current_day
 
+        self.advance_electronic_completions()
+
         if self.is_working_time():
-            self.advance_electronic_completions()
             self.field_staff.shuffle_do('step')
-        self.advance_clock()
+        elif not self._home_phase:
+            # Working time just ended — start the home phase.
+            self._home_phase = True
+            for agent in self.field_staff:
+                if agent.absent_today:
+                    continue
+                if not agent.going_home and agent.home_node is not None \
+                        and not agent.has_knocked_all_assigned_households():
+                    # Agent didn't finish their route; send them home now.
+                    agent.going_home = True
+                    agent.clear_route()
+
+        if self._home_phase:
+            # Keep stepping agents until all present staff are home.
+            all_home = all(agent.is_home() for agent in self.field_staff)
+            if not all_home:
+                self.field_staff.shuffle_do('step')
+            else:
+                self._home_phase = False
+                self.advance_clock()
+        else:
+            self.advance_clock()
 
         # Day boundary: update target LSOAs and reassign agents
         if self.current_day != self._prev_day:
@@ -830,6 +893,8 @@ class FieldWorkModel(mesa.Model):
                 0,
                 daily_total_interactions,
             )
+            self.daily_multi_visits_by_day[completed_day] = self._current_day_multi_visits
+            self._current_day_multi_visits = 0
 
             total_hh = sum(
                 s['total_households'] for s in self.lsoa_stats.values()

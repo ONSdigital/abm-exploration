@@ -60,12 +60,14 @@ def init_callbacks(app, state, viz_data):
         State('absence-toggle', 'value'),
         State('route-compliance-toggle', 'value'),
         State('revisit-buffer-slider', 'value'),
+        State('homeward-revisit-toggle', 'value'),
         prevent_initial_call=True,
     )
     def handle_controls(play_clicks, pause_clicks, reset_clicks,
                         field_staff_value, daily_hh_value, store,
                         step_duration, absence_toggle,
-                        route_compliance_toggle, revisit_buffer_value):
+                        route_compliance_toggle, revisit_buffer_value,
+                        homeward_revisit_toggle):
         """
         Toggle running state or reset the model.
         """
@@ -92,6 +94,7 @@ def init_callbacks(app, state, viz_data):
             selected_daily_hh = int(daily_hh_value or daily_hh_per_agent)
             apply_daily_absences = bool(absence_toggle)
             apply_route_non_compliance = bool(route_compliance_toggle)
+            apply_homeward_revisits = bool(homeward_revisit_toggle)
             revisit_buffer = int(revisit_buffer_value) if \
                 revisit_buffer_value is not None else 0
             state['model'].reset(
@@ -100,6 +103,7 @@ def init_callbacks(app, state, viz_data):
                 apply_daily_absences=apply_daily_absences,
                 apply_route_non_compliance=apply_route_non_compliance,
                 revisit_buffer_days=revisit_buffer,
+                apply_homeward_revisits=apply_homeward_revisits,
             )
             if step_duration is not None:
                 state['model'].simulation_step_seconds = step_duration
@@ -249,6 +253,7 @@ def init_callbacks(app, state, viz_data):
         Output('cumulative-chart', 'figure'),
         Output('questionnaire-completion-chart', 'figure'),
         Output('attendance-chart', 'figure'),
+        Output('multi-visits-chart', 'figure'),
         Input('view-results-btn', 'n_clicks'),
         Input('close-results-btn', 'n_clicks'),
         prevent_initial_call=True,
@@ -273,7 +278,7 @@ def init_callbacks(app, state, viz_data):
 
         if dash.callback_context.triggered_id == 'close-results-btn':
             return _overlay_hidden, no_update, no_update, no_update, \
-                no_update, no_update
+                no_update, no_update, no_update
 
         model = state['model']
         data = model.daily_interaction_time_pct
@@ -285,7 +290,7 @@ def init_callbacks(app, state, viz_data):
                 yaxis_title='Interaction time (%)',
             )
             return _overlay_visible, empty_fig, go.Figure(), go.Figure(), \
-                    go.Figure(), go.Figure()
+                    go.Figure(), go.Figure(), go.Figure()
 
         days = sorted(data.keys())
         pcts = [data[d] for d in days]
@@ -456,8 +461,40 @@ def init_callbacks(app, state, viz_data):
             showlegend=False,
         )
 
+        multi_visits_data = model.daily_multi_visits_by_day
+        cumulative_multi_visits = []
+        running_multi = 0
+        for d in days:
+            running_multi += multi_visits_data.get(d, 0)
+            cumulative_multi_visits.append(running_multi)
+        fig_multi_visits = go.Figure(go.Scatter(
+            x=day_labels,
+            y=cumulative_multi_visits,
+            mode='lines+markers',
+            line={'color': 'darkorange'},
+            hovertemplate='%{x}<br>Cumulative re-visits: %{y}<extra></extra>',
+        ))
+        fig_multi_visits.update_layout(
+            title='Cumulative same-day re-visits',
+            xaxis_title='Day',
+            yaxis_title='Re-visits (cumulative)',
+            yaxis={
+                'showgrid': True,
+                'gridcolor': 'rgba(200, 200, 200, 0.4)',
+                'showline': True,
+                'linecolor': 'black',
+            },
+            xaxis={
+                'showgrid': False,
+                'showline': True,
+                'linecolor': 'black',
+            },
+            plot_bgcolor='white',
+            showlegend=False,
+        )
+
         return _overlay_visible, fig_time, fig_contacts, fig_cumulative, \
-            fig_completion, fig_attendance
+            fig_completion, fig_attendance, fig_multi_visits
 
     @app.callback(
         Output('map', 'figure', allow_duplicate=True),
