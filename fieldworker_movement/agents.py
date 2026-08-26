@@ -11,6 +11,7 @@ from config import (
     KNOCK_RESPONSE_CHANCE,
     hh_interaction_mean,
     hh_interaction_std,
+    homeward_revisit_radius,
 )
 
 
@@ -97,6 +98,10 @@ class FieldWorker(mesa.Agent):
         self.assigned_day = None  # Day when this agent was last assigned (for diagnostics)
         self.absent_today = False  # True if this agent is absent from work today
         self.use_nn_routing = False  # True if this agent ignores the planned route and uses nearest-neighbour routing
+        self.home_node = None  # Node assigned as today's home address
+        self.going_home = False  # True when agent is routing to home_node
+        self.homeward_revisit_prone = False  # True if this agent re-knocks non-answered households within range on the route home
+        self.households_interacted = set()  # Households where a face-to-face interaction occurred today (also used to prevent duplicate homeward re-knocks)
 
     def has_pending_assigned_household_at_node(self, node):
         """
@@ -147,6 +152,9 @@ class FieldWorker(mesa.Agent):
         self.pending_assigned_households = set()
         self.node_to_pending_assigned = {}
         self.vrp_waypoints = []
+        self.home_node = None
+        self.going_home = False
+        self.households_interacted = set()
 
     def has_incomplete_households(self):
         """
@@ -195,6 +203,9 @@ class FieldWorker(mesa.Agent):
             The (easting, northing) coordinates of the chosen target node, or
             None if all households have completed the Census questionnaire.
         """
+        if self.going_home:
+            return self.home_node
+
         if self.has_pending_assigned_household_at_node(self.node):
             return self.node
 
@@ -293,6 +304,65 @@ class FieldWorker(mesa.Agent):
         -------
         None
         """
+        if self.going_home:
+            if not self.route_nodes and not self.build_route():
+                return
+
+            if self.target_node == self.node:
+                self.display_position = self.node
+                self.going_home = False
+                self.clear_route()
+                return
+
+            distance_budget = self.model.travel_distance_per_step
+            while distance_budget > 0 and self.route_index < len(self.route_nodes) - 1:
+                start_node = self.route_nodes[self.route_index]
+                end_node = self.route_nodes[self.route_index + 1]
+                edge_length = self.model.graph[start_node][end_node]['length']
+                remaining_edge_distance = edge_length - self.edge_progress
+
+                if distance_budget < remaining_edge_distance:
+                    self.edge_progress += distance_budget
+                    self.display_position = self.interpolate_position(
+                        start_node,
+                        end_node,
+                        edge_length,
+                    )
+                    return
+
+                distance_budget -= remaining_edge_distance
+                self.edge_progress = 0.0
+                self.prev_node = self.node
+                self.model.grid.move_agent(self, end_node)
+                self.node = end_node
+                self.display_position = end_node
+                self.route_index += 1
+
+                if self.node == self.home_node:
+                    self.going_home = False
+                    self.clear_route()
+                    return
+
+                if self.homeward_revisit_prone:
+                    no_answer_hh = self.households_knocked - self.households_interacted
+                    if no_answer_hh:
+                        radius_sq = homeward_revisit_radius ** 2
+                        nx_, ny_ = self.node
+                        nearby = [
+                            hh for hh in no_answer_hh
+                            if (hh.node[0] - nx_) ** 2 + (hh.node[1] - ny_) ** 2 <= radius_sq
+                        ]
+                        if nearby:
+                            closest = min(
+                                nearby,
+                                key=lambda hh: (hh.node[0] - nx_) ** 2 + (hh.node[1] - ny_) ** 2,
+                            )
+                            self.visit_household_at(closest)
+                            return
+
+            self.display_position = self.node
+            return
+
         if self.edge_progress == 0 and \
                 self.has_pending_assigned_household_at_node(self.node):
             self.clear_route()
@@ -363,6 +433,9 @@ class FieldWorker(mesa.Agent):
             True if someone answers the door, False otherwise.
         """
         self.model.lsoa_stats[household.lsoa]['knocks'] += 1
+        if household.last_knocked_day == self.model.current_day:
+            self.model._current_day_multi_visits += 1
+        household.last_knocked_day = self.model.current_day
         self.households_knocked.add(household)
         self.pending_assigned_households.discard(household)
         self.node_to_pending_assigned.get(household.node, set()).discard(household)
@@ -405,8 +478,44 @@ class FieldWorker(mesa.Agent):
         if not candidates:
             return
         household = self.random.choice(candidates)
-        household.last_knocked_day = self.model.current_day
         answered = self.knock(household)
+        if answered:
+            self.households_interacted.add(household)
+            interaction_length = self.interaction(
+                household,
+                self.interaction_mu,
+                self.interaction_std,
+            )
+            interaction_seconds = max(0.0, interaction_length)
+            self.busy_time_remaining_seconds += interaction_seconds
+            self.model.current_day_interaction_seconds += interaction_seconds
+            if self.random.random() < INTERACTION_COMPLETION_CHANCE:
+                self.model.register_completion(
+                    household,
+                    characteristic='fieldwork',
+                    step_number=self.model.steps,
+                )
+        elif self.random.random() < KNOCK_COMPLETION_CHANCE:
+            self.model.register_completion(
+                household,
+                characteristic='fieldwork',
+                step_number=self.model.steps,
+            )
+
+    def visit_household_at(self, household):
+        """
+        Knock on a specific household during the homeward journey. Follows the
+        same knock/interact/complete logic as visit_household(), but targets a
+        nominated household rather than reading from node_to_pending_assigned.
+        The household is added to households_interacted regardless of outcome
+        so it is not attempted again on this journey.
+        """
+        if household.survey_completed:
+            self.households_interacted.add(household)
+            return
+        
+        answered = self.knock(household)
+        self.households_interacted.add(household)
         if answered:
             interaction_length = self.interaction(
                 household,
@@ -429,6 +538,16 @@ class FieldWorker(mesa.Agent):
                 step_number=self.model.steps,
             )
 
+    def is_home(self):
+        """
+        Return True if the agent has completed their journey home today.
+        An absent agent is considered home (they never left).
+        """
+        if self.absent_today:
+            return True
+        return self.home_node is not None and not self.going_home and \
+            self.node == self.home_node
+
     def step(self):
         """
         One step for each field staff agent in the simulation. Acknowledges if 
@@ -445,5 +564,12 @@ class FieldWorker(mesa.Agent):
             )
             return
 
+        # Trigger heading home as soon as the assignment is complete.
+        if not self.going_home and self.home_node is not None \
+                and self.has_knocked_all_assigned_households():
+            self.going_home = True
+            self.clear_route()
+
         self.move()
-        self.visit_household()
+        if not self.going_home:
+            self.visit_household()
