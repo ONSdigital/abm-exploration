@@ -6,15 +6,15 @@ Aaron Stace, 03/07/2026
 #-------------------------------FILE PATHS--------------------------------#
 
 # File paths need two backslashes otherwise the code will break.
-ADDRESSES_FILEPATH = "C:\\Users\\stacea\\abm-exploration\\fieldworker_movement\\addresses\\Raw_Address_Data_Newcastle_April_2025.csv"
-ROADS_FILEPATH = "C:\\Users\\stacea\\abm-exploration\\fieldworker_movement\\newcastle_upon_tyne_shapefiles\\Roads\\Newcastle_Upon_Tyne_Roads_2.gpkg"
-PATHS_FILEPATH = "C:\\Users\\stacea\\abm-exploration\\fieldworker_movement\\newcastle_upon_tyne_shapefiles\\Paths\\Newcastle_Upon_Tyne_Paths.gpkg"
-LSOAS_FILEPATH = "C:\\Users\\stacea\\abm-exploration\\fieldworker_movement\\newcastle_upon_tyne_shapefiles\\LSOAs\\LSOAs_Newcastle_Upon_Tyne.gpkg"
+ADDRESSES_FILEPATH = r"C:\Users\stacea\abm-exploration\fieldworker_movement\addresses\Raw_Address_Data_Newcastle_April_2025.csv"
+ROADS_FILEPATH = r"C:\Users\stacea\abm-exploration\fieldworker_movement\newcastle_upon_tyne_shapefiles\Roads\Newcastle_Upon_Tyne_Roads_2.gpkg"
+PATHS_FILEPATH = r"C:\Users\stacea\abm-exploration\fieldworker_movement\newcastle_upon_tyne_shapefiles\Paths\Newcastle_Upon_Tyne_Paths.gpkg"
+LSOAS_FILEPATH = r"C:\Users\stacea\abm-exploration\fieldworker_movement\newcastle_upon_tyne_shapefiles\LSOAs\LSOAs_Newcastle_Upon_Tyne.gpkg"
 
 # Cached network GeoDataFrame written after the first neatnet.close_gaps run.
 # Delete this file to force a rebuild (e.g. after updating the shapefiles).
-NETWORK_CACHE_FILEPATH = "C:\\Users\\stacea\\abm-exploration\\fieldworker_movement\\network_graphs\\network_cache.gpkg"
-LSOA_COMPLETION_FILEPATH = "C:\\Users\\stacea\\abm-exploration\\fieldworker_movement\\addresses\\lsoa_completion_rates_low_variation.csv"
+NETWORK_CACHE_FILEPATH = r"C:\Users\stacea\abm-exploration\fieldworker_movement\network_graphs\network_cache.gpkg"
+LSOA_COMPLETION_FILEPATH = r"C:\Users\stacea\abm-exploration\fieldworker_movement\addresses\lsoa_completion_rates_low_variation.csv"
 
 
 #--------------------------------ADDRESS FILE--------------------------------#
@@ -30,7 +30,7 @@ ONGOING_COMPLETION_COLUMN = 'ongoing_completion_rate'
 
 DEFAULT_INITIAL_COMPLETION_RATE = 0.0
 DEFAULT_ONGOING_COMPLETION_RATE = 0.0
-KNOCK_RESPONSE_CHANCE = 0.8
+KNOCK_RESPONSE_CHANCE = 0.6
 KNOCK_COMPLETION_CHANCE = 0.3
 INTERACTION_COMPLETION_CHANCE = 0.8
 
@@ -53,6 +53,9 @@ daily_absence_rate = 0.2  # Probability that any given field worker is absent on
 non_compliant_agent_pct = 0.10  # Fraction of field staff who ignore the planned route and use nearest-neighbour routing instead.
 homeward_revisit_agent_pct = 0.20  # Fraction of field staff who re-knock non-answered households encountered within range on their route home.
 homeward_revisit_radius = 50  # Radius in metres within which a homeward-bound agent will consider re-knocking a non-answered household.
+max_household_visits = 3  # Maximum number of times a household can be visited over the entire model run.
+agents_per_lsoa = 2  # Number of field staff agents assigned to each target LSOA per day.
+revisit_buffer_days = 3  # Minimum days between re-visits to the same household (0 = off).
 
 
 #---------------------------CHOROPLETH METRICS---------------------------#

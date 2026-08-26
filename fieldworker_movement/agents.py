@@ -12,6 +12,7 @@ from config import (
     hh_interaction_mean,
     hh_interaction_std,
     homeward_revisit_radius,
+    max_household_visits,
 )
 
 
@@ -40,6 +41,7 @@ class Household(mesa.Agent):
         self.completion_step = 0 if survey_completed else None
         self.completion_source = 'initial' if survey_completed else None
         self.last_knocked_day = None
+        self.total_knock_count = 0
 
     def complete_survey(self, step_number, source):
         """
@@ -435,6 +437,9 @@ class FieldWorker(mesa.Agent):
         self.model.lsoa_stats[household.lsoa]['knocks'] += 1
         if household.last_knocked_day == self.model.current_day:
             self.model._current_day_multi_visits += 1
+        if household.last_knocked_day is not None and household.last_knocked_day != self.model.current_day:
+            self.model._current_day_cross_day_revisits += 1
+        household.total_knock_count += 1
         household.last_knocked_day = self.model.current_day
         self.households_knocked.add(household)
         self.pending_assigned_households.discard(household)
@@ -510,7 +515,7 @@ class FieldWorker(mesa.Agent):
         The household is added to households_interacted regardless of outcome
         so it is not attempted again on this journey.
         """
-        if household.survey_completed:
+        if household.survey_completed or household.total_knock_count >= max_household_visits:
             self.households_interacted.add(household)
             return
         

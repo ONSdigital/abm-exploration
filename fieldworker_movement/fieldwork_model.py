@@ -5,6 +5,7 @@ mechanisms such as agent interaction and movement.
 Aaron Stace, 03/07/2026
 """
 import math
+import random
 from collections import defaultdict
 
 import mesa
@@ -20,10 +21,13 @@ from config import (
     ONGOING_COMPLETION_COLUMN,
     PATHS_FILEPATH,
     ROADS_FILEPATH,
+    agents_per_lsoa,
     daily_absence_rate,
     daily_hh_per_agent,
     homeward_revisit_agent_pct,
+    max_household_visits,
     non_compliant_agent_pct,
+    revisit_buffer_days,
     simulation_step_seconds,
     walking_speed,
     workday_duration_hours,
@@ -48,10 +52,15 @@ class FieldWorkModel(mesa.Model):
     """
 
     def __init__(self, num_field_staff, apply_daily_absences=True,
-                 apply_route_non_compliance=True, revisit_buffer_days=0,
-                 apply_homeward_revisits=True):
+                 apply_route_non_compliance=True,
+                 revisit_buffer_days=revisit_buffer_days,
+                 apply_homeward_revisits=True, seed=None):
         
-        super().__init__()
+        super().__init__(seed=seed)
+        self._seed = seed
+        self._absence_rng  = random.Random(None if seed is None else seed + 1)
+        self._routing_rng  = random.Random(None if seed is None else seed + 2)
+        self._homeward_rng = random.Random(None if seed is None else seed + 3)
 
         self.simulation_step_seconds = simulation_step_seconds
         self.walking_speed = walking_speed
@@ -168,6 +177,8 @@ class FieldWorkModel(mesa.Model):
         self._incomplete_nodes_cache = {}
         self._home_phase = False
         self._current_day_multi_visits = 0
+        self.daily_cross_day_revisits_by_day = {}
+        self._current_day_cross_day_revisits = 0
 
     def _assign_routing_types(self):
         """
@@ -181,7 +192,7 @@ class FieldWorkModel(mesa.Model):
             return
 
         num_non_compliant = round(len(self.field_staff) * non_compliant_agent_pct)
-        non_compliant = self.random.sample(list(self.field_staff), num_non_compliant)
+        non_compliant = self._routing_rng.sample(list(self.field_staff), num_non_compliant)
         non_compliant_ids = {agent.unique_id for agent in non_compliant}
         for agent in self.field_staff:
             agent.use_nn_routing = agent.unique_id in non_compliant_ids
@@ -199,7 +210,7 @@ class FieldWorkModel(mesa.Model):
             return
 
         num_prone = round(len(self.field_staff) * homeward_revisit_agent_pct)
-        prone = self.random.sample(list(self.field_staff), num_prone)
+        prone = self._homeward_rng.sample(list(self.field_staff), num_prone)
         prone_ids = {agent.unique_id for agent in prone}
         for agent in self.field_staff:
             agent.homeward_revisit_prone = agent.unique_id in prone_ids
@@ -219,7 +230,7 @@ class FieldWorkModel(mesa.Model):
             return
 
         for agent in self.field_staff:
-            agent.absent_today = self.random.random() < daily_absence_rate
+            agent.absent_today = self._absence_rng.random() < daily_absence_rate
         total = len(self.field_staff)
         present = sum(1 for a in self.field_staff if not a.absent_today)
         self.daily_attendance_pct[self.current_day] = (
@@ -253,7 +264,7 @@ class FieldWorkModel(mesa.Model):
             The ordered LSOA codes selected for the current day.
         """
         if target_count is None:
-            target_count = math.ceil(len(self.field_staff) / 2)
+            target_count = math.ceil(len(self.field_staff) / agents_per_lsoa)
 
         target_count = max(0, int(target_count))
 
@@ -459,7 +470,7 @@ class FieldWorkModel(mesa.Model):
         """
         return [
             household for household in self.lsoa_to_households.get(lsoa_code, [])
-            if not household.survey_completed
+            if not household.survey_completed and household.total_knock_count < max_household_visits
         ]
 
     def _build_open_tsp_route(self, start_node, stop_nodes):
@@ -540,8 +551,8 @@ class FieldWorkModel(mesa.Model):
 
     def assign_daily_households_and_routes(self, lsoa_code, agents):
         """
-        For one LSOA, assign up to 10 unique households per agent for the day
-        and build each agent's TSP visit order.
+        For one LSOA, assign up to `hh_per_agent` unique households per agent
+        for the day and build each agent's TSP visit order.
         """
         if not agents:
             return
@@ -642,7 +653,7 @@ class FieldWorkModel(mesa.Model):
         num_target_lsoas = len(self.daily_target_lsoas)
         single_agent_lsoa = None
 
-        if num_agents % 2 == 1 and num_target_lsoas > 0:
+        if num_agents % agents_per_lsoa != 0 and num_target_lsoas > 0:
             # Pick the least urgent LSOA for the single agent
             single_agent_lsoa = max(
                 self.daily_target_lsoas,
@@ -659,7 +670,7 @@ class FieldWorkModel(mesa.Model):
             return {}
 
         capacity_by_lsoa = {
-            lsoa: (1 if lsoa == single_agent_lsoa else 2)
+            lsoa: (1 if lsoa == single_agent_lsoa else agents_per_lsoa)
             for lsoa in self.daily_target_lsoas
         }
         assignments = {lsoa: [] for lsoa in self.daily_target_lsoas}
@@ -760,6 +771,9 @@ class FieldWorkModel(mesa.Model):
         """
         # Reset time / simulation state
         self._reset_run_counters()
+        self._absence_rng  = random.Random(None if self._seed is None else self._seed + 1)
+        self._routing_rng  = random.Random(None if self._seed is None else self._seed + 2)
+        self._homeward_rng = random.Random(None if self._seed is None else self._seed + 3)
         self.apply_daily_absences = apply_daily_absences
         self.apply_route_non_compliance = apply_route_non_compliance
         self.apply_homeward_revisits = apply_homeward_revisits
@@ -791,6 +805,7 @@ class FieldWorkModel(mesa.Model):
             household.completion_step = 0 if survey_completed else None
             household.completion_source = 'initial' if survey_completed else None
             household.last_knocked_day = None
+            household.total_knock_count = 0
             self.lsoa_stats[household.lsoa]['total_households'] += 1
             self.lsoa_stats[household.lsoa]['remaining_households'] += 1
             if survey_completed:
@@ -895,6 +910,8 @@ class FieldWorkModel(mesa.Model):
             )
             self.daily_multi_visits_by_day[completed_day] = self._current_day_multi_visits
             self._current_day_multi_visits = 0
+            self.daily_cross_day_revisits_by_day[completed_day] = self._current_day_cross_day_revisits
+            self._current_day_cross_day_revisits = 0
 
             total_hh = sum(
                 s['total_households'] for s in self.lsoa_stats.values()

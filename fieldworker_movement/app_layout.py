@@ -405,6 +405,8 @@ def create_layout(initial_fig):
                               style={'height': '40vh'}),
                     dcc.Graph(id='multi-visits-chart',
                               style={'height': '40vh'}),
+                    dcc.Graph(id='cross-day-revisits-chart',
+                              style={'height': '40vh'}),
                 ], style={
                     'display': 'grid',
                     'gridTemplateColumns': '1fr 1fr',
