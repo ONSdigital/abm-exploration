@@ -20,7 +20,7 @@ from plotly.subplots import make_subplots
 
 # ── Configuration — edit these ────────────────────────────────────────────────
 
-SEED = 42
+SEED = 55
 NUM_DAYS = 10
 OUTPUT_DIR = r"C:\Users\stacea\abm-exploration\fieldworker_movement\model_outputs"
 
