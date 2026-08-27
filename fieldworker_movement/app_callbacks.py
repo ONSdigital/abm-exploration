@@ -254,6 +254,7 @@ def init_callbacks(app, state, viz_data):
         Output('questionnaire-completion-chart', 'figure'),
         Output('attendance-chart', 'figure'),
         Output('multi-visits-chart', 'figure'),
+        Output('cross-day-revisits-chart', 'figure'),
         Input('view-results-btn', 'n_clicks'),
         Input('close-results-btn', 'n_clicks'),
         prevent_initial_call=True,
@@ -278,7 +279,7 @@ def init_callbacks(app, state, viz_data):
 
         if dash.callback_context.triggered_id == 'close-results-btn':
             return _overlay_hidden, no_update, no_update, no_update, \
-                no_update, no_update, no_update
+                no_update, no_update, no_update, no_update
 
         model = state['model']
         data = model.daily_interaction_time_pct
@@ -290,7 +291,7 @@ def init_callbacks(app, state, viz_data):
                 yaxis_title='Interaction time (%)',
             )
             return _overlay_visible, empty_fig, go.Figure(), go.Figure(), \
-                    go.Figure(), go.Figure(), go.Figure()
+                    go.Figure(), go.Figure(), go.Figure(), go.Figure()
 
         days = sorted(data.keys())
         pcts = [data[d] for d in days]
@@ -493,8 +494,52 @@ def init_callbacks(app, state, viz_data):
             showlegend=False,
         )
 
+        cross_day_data = model.daily_cross_day_revisits_by_day
+        per_day_cross = [cross_day_data.get(d, 0) for d in days]
+        cumulative_cross = []
+        running_cross = 0
+        for d in days:
+            running_cross += cross_day_data.get(d, 0)
+            cumulative_cross.append(running_cross)
+        fig_cross_day_revisits = go.Figure()
+        fig_cross_day_revisits.add_trace(go.Bar(
+            x=day_labels,
+            y=per_day_cross,
+            name='Cross-day revisits (daily)',
+            marker_color='crimson',
+            opacity=0.6,
+            hovertemplate='%{x}<br>Revisits: %{y}<extra></extra>',
+        ))
+        fig_cross_day_revisits.add_trace(go.Scatter(
+            x=day_labels,
+            y=cumulative_cross,
+            mode='lines+markers',
+            name='Cumulative cross-day revisits',
+            line={'color': 'darkred'},
+            hovertemplate='%{x}<br>Total revisits: %{y}<extra></extra>',
+        ))
+        fig_cross_day_revisits.update_layout(
+            title='Cross-day revisits (households visited on a previous day)',
+            xaxis_title='Day',
+            yaxis_title='Revisits',
+            yaxis={
+                'showgrid': True,
+                'gridcolor': 'rgba(200, 200, 200, 0.4)',
+                'showline': True,
+                'linecolor': 'black',
+            },
+            xaxis={
+                'showgrid': False,
+                'showline': True,
+                'linecolor': 'black',
+            },
+            barmode='overlay',
+            plot_bgcolor='white',
+            legend={'orientation': 'h', 'y': -0.2},
+        )
+
         return _overlay_visible, fig_time, fig_contacts, fig_cumulative, \
-            fig_completion, fig_attendance, fig_multi_visits
+            fig_completion, fig_attendance, fig_multi_visits, fig_cross_day_revisits
 
     @app.callback(
         Output('map', 'figure', allow_duplicate=True),
