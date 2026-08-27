@@ -292,8 +292,8 @@ def create_layout(initial_fig):
                                   style={'fontWeight': 'bold'}),
                         dcc.Slider(
                             id='field-staff-slider',
-                            min=1, max=50, step=1, value=num_field_staff,
-                            marks={1: '1', 10: '10', 25: '25', 50: '50'},
+                            min=1, max=100, step=1, value=num_field_staff,
+                            marks={1: '1', 50: '50', 100: '100'},
                             tooltip={'placement': 'bottom',
                                      'always_visible': False},
                         ),
@@ -308,9 +308,8 @@ def create_layout(initial_fig):
                                   style={'fontWeight': 'bold'}),
                         dcc.Slider(
                             id='daily-hh-per-agent-slider',
-                            min=1, max=200, step=1, value=daily_hh_per_agent,
-                            marks={1: '1', 50: '50', 100: '100', 150: '150', 
-                                   200: '200'},
+                            min=1, max=120, step=1, value=daily_hh_per_agent,
+                            marks={1: '1', 60: '60', 120: '120'},
                             tooltip={'placement': 'bottom',
                                      'always_visible': False},
                         ),

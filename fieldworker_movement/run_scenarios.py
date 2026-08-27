@@ -21,7 +21,7 @@ from plotly.subplots import make_subplots
 # ── Configuration — edit these ────────────────────────────────────────────────
 
 SEED = 42
-NUM_DAYS = 7
+NUM_DAYS = 10
 OUTPUT_DIR = r"C:\Users\stacea\abm-exploration\fieldworker_movement\model_outputs"
 
 # Safety cap: if a scenario hasn't finished after this many steps, stop early
@@ -30,10 +30,10 @@ MAX_STEPS_GUARD = 5_000_000
 
 SCENARIOS = [
     {
-        'label': 'Test',
-        'apply_daily_absences':       True,
-        'apply_route_non_compliance': True,
-        'apply_homeward_revisits':    True,
+        'label': 'Baseline',
+        'apply_daily_absences':       False,
+        'apply_route_non_compliance': False,
+        'apply_homeward_revisits':    False,
         'revisit_buffer_days':        revisit_buffer_days,
     },
 ]
