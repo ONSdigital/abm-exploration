@@ -124,7 +124,7 @@ def build_graph_from_shapefile(gdf):
     G = nx.Graph()
 
     for row in gdf.itertuples(index=False):
-        coords = list(row.geometry.coords)
+        coords = [(x, y) for x, y, *_ in row.geometry.coords]
         edge_type = row.type
         G.add_edges_from(
             (start, end, {
