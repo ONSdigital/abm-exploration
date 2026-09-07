@@ -14,7 +14,7 @@ LSOAS_FILEPATH = r"C:\Users\stacea\abm-exploration\fieldworker_movement\newcastl
 # Cached network GeoDataFrame written after the first neatnet.close_gaps run.
 # Delete this file to force a rebuild (e.g. after updating the shapefiles).
 NETWORK_CACHE_FILEPATH = r"C:\Users\stacea\abm-exploration\fieldworker_movement\network_graphs\network_cache.gpkg"
-LSOA_COMPLETION_FILEPATH = r"C:\Users\stacea\abm-exploration\fieldworker_movement\addresses\lsoa_completion_rates_final.csv"
+LSOA_COMPLETION_FILEPATH = r"C:\Users\stacea\abm-exploration\fieldworker_movement\addresses\lsoa_completion_rates_high_long_routes.csv"
 
 
 #--------------------------------ADDRESS FILE--------------------------------#

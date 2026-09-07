@@ -454,23 +454,30 @@ class FieldWorkModel(mesa.Model):
         self.shortest_path_nodes_cache[key] = path
         return path
 
-    def get_incomplete_households_for_lsoa(self, lsoa_code):
+    def get_incomplete_households(self, lsoa_code=None):
         """
-        Return incomplete households in an LSOA.
+        Return incomplete households, optionally filtered to a single LSOA.
 
         Parameters
         ----------
-        lsoa_code : str
-            The LSOA code to retrieve households for.
+        lsoa_code : str or None
+            The LSOA code to filter by. When None, households from all LSOAs
+            are returned.
 
         Returns
         -------
         list[Household]
-            Incomplete households for the LSOA.
+            Incomplete households that are still eligible for visits.
         """
+        if lsoa_code is None:
+            households = self.households
+        else:
+            households = self.lsoa_to_households.get(lsoa_code, [])
+
         return [
-            household for household in self.lsoa_to_households.get(lsoa_code, [])
-            if not household.survey_completed and household.total_knock_count < max_household_visits
+            household for household in households
+            if not household.survey_completed
+            and household.total_knock_count < max_household_visits
         ]
 
     def _build_open_tsp_route(self, start_node, stop_nodes):
@@ -549,15 +556,18 @@ class FieldWorkModel(mesa.Model):
 
         return tour
 
-    def assign_daily_households_and_routes(self, lsoa_code, agents):
+    def assign_daily_households_and_routes(self, agents):
         """
-        For one LSOA, assign up to `hh_per_agent` unique households per agent
-        for the day and build each agent's TSP visit order.
+        Assign up to `hh_per_agent` unique households per agent for the day
+        and build each agent's TSP visit order.
+
+        Household allocation is LSOA-blind: all assigned agents draw from the
+        same eligible incomplete-household pool.
         """
         if not agents:
             return
 
-        all_incomplete = self.get_incomplete_households_for_lsoa(lsoa_code)
+        all_incomplete = self.get_incomplete_households()
         if self.revisit_buffer_days > 0:
             incomplete_households = [
                 hh for hh in all_incomplete
@@ -622,9 +632,12 @@ class FieldWorkModel(mesa.Model):
             else:
                 agent.vrp_waypoints = self._build_open_tsp_route(agent.node, target_nodes)
 
-            # Assign a random home address in the same LSOA for end-of-day routing.
-            lsoa_households = self.lsoa_to_households.get(lsoa_code, [])
-            unvisited = [hh for hh in lsoa_households if hh not in agent.households_knocked]
+            # Assign a random home address in the agent's assigned LSOA.
+            lsoa_households = self.lsoa_to_households.get(agent.assigned_lsoa, [])
+            unvisited = [
+                hh for hh in lsoa_households
+                if hh not in agent.households_knocked
+            ]
             if unvisited:
                 agent.home_node = self.random.choice(unvisited).node
             elif lsoa_households:
@@ -719,8 +732,12 @@ class FieldWorkModel(mesa.Model):
                 self.grid.move_agent(agent, depot_node)
                 agent.node = depot_node
 
-        for lsoa, agents in assignments.items():
-            self.assign_daily_households_and_routes(lsoa, agents)
+        all_assigned_agents = [
+            agent
+            for lsoa_agents in assignments.values()
+            for agent in lsoa_agents
+        ]
+        self.assign_daily_households_and_routes(all_assigned_agents)
 
         return assignments
 
